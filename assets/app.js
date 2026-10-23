@@ -111,20 +111,27 @@
       .trim();
   }
 
+  // Rows left out of every count, check and fix (NCR rows 4–5 have no source
+  // document and carry their own subtotal). Matched by name so it survives
+  // rows being inserted above them.
+  var EXCLUDED = /^(ultrasonic water-level gauging station|radar water surface velocity station)$/i;
+
   function normalize(rows) {
     var start = 0;
     for (var i = 0; i < Math.min(rows.length, 10); i++) {
       if (/implementing office/i.test(rows[i][1] || "")) { start = i + 1; break; }
     }
     var out = [], regions = [], declared = {}, declaredCells = {}, regionFirstRow = {};
-    var grand = 0, grandRow = 0, emptyRows = [], rawCells = [];
+    var grand = 0, grandRow = 0, emptyRows = [], rawCells = [], excluded = [];
     var region = "", office = "";
     for (var r = start; r < rows.length; r++) {
       var row = rows[r];
       var rg = clean(row[0]), of = clean(row[1]), eq = clean(row[2]);
       var decl = num(row[6]);
       var sheetRow = r + 1;
-      if (rg) { region = rg; office = ""; if (regions.indexOf(rg) < 0) { regions.push(rg); regionFirstRow[rg] = sheetRow; } }
+      if (rg) { region = rg; office = ""; if (regions.indexOf(rg) < 0) regions.push(rg); }
+      if (EXCLUDED.test(eq)) { excluded.push({ row: sheetRow, region: region, equipment: eq }); continue; }
+      if (eq && region && !regionFirstRow[region]) regionFirstRow[region] = sheetRow;
       if (of) office = of;
       if (rg || of || eq) rawCells.push({ row: sheetRow, region: region, office: office, cells: row });
       if (!eq) {
@@ -164,7 +171,8 @@
     emptyRows = emptyRows.filter(function (x) { return x < lastRow; });
     return {
       records: out, regions: regions, declared: declared, declaredCells: declaredCells,
-      regionFirstRow: regionFirstRow, grand: grand, grandRow: grandRow, emptyRows: emptyRows, rawCells: rawCells
+      regionFirstRow: regionFirstRow, grand: grand, grandRow: grandRow, emptyRows: emptyRows, rawCells: rawCells,
+      excluded: excluded
     };
   }
 
@@ -1038,7 +1046,9 @@
         (Math.abs(gd) < 1 ? '<span class="ok">✓</span>' : '<span class="diff">' + signed(gd) + "</span>") + "</span></div>";
     }
     $("recon").innerHTML = html;
-    $("reconNote").innerHTML = "Sum of all region “Total Amount Requested” cells: <b>" + money(a.declSum) + "</b>. If every row used Qty × Unit Price, the grand total would be <b>" + money(a.qtyFixed) + "</b>.";
+    $("reconNote").innerHTML = "Sum of all region “Total Amount Requested” cells: <b>" + money(a.declSum) + "</b>. If every row used Qty × Unit Price, the grand total would be <b>" + money(a.qtyFixed) + "</b>." +
+      (state.data.excluded.length ? " Left out of every total and check: rows " + state.data.excluded.map(function (x) { return x.row; }).join(", ") +
+        " (" + esc(state.data.excluded.map(function (x) { return x.equipment; }).join(", ")) + ")." : "");
   }
 
   function renderAlert() {
