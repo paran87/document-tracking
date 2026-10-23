@@ -29,7 +29,7 @@ Writes require the passcode; the history list is readable without it.
 
 Cell links (the Drive links on the region totals) are kept when a cell is rewritten. When an extra region total is emptied, its link moves to the region's total, or to the office name on that row if the total already has a link. The *Note* column in Fix History records where each link went.
 
-**Updating the script:** paste the new `Code.gs`, choose the **authorize** function in the editor's toolbar and press **Run**, allow the permissions Google asks for (the script reads cell links through the Sheets API), then **Deploy → Manage deployments → Edit → Version: New version → Deploy**. If a fix then fails with *"Google Sheets API has not been used in project …"*, open the link in that message and press **Enable** (or add **Google Sheets API** under *Services ＋* in the editor), wait a minute and retry.
+**Updating the script:** paste the new `Code.gs`, choose the **authorize** function in the editor's toolbar and press **Run**, allow the permissions Google asks for (the script reads cell links through the Sheets API), then **Deploy → Manage deployments → Edit → Version: New version → Deploy**. If a fix then fails with *"Google Sheets API has not been used in project …"*, click **＋** next to *Services* in the editor, add **Google Sheets API**, run **authorize** again, deploy a new version and retry. (The Cloud Console link in the message usually says *You need additional access*, because the script's default Cloud project is hidden.)
 
 ## Data
 
