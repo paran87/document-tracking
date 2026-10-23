@@ -1150,6 +1150,8 @@
 
   // The script needs a one-time permission grant after it is updated.
   function authHint(msg) {
+    if (/has not been used in project|SERVICE_DISABLED|is disabled/i.test(msg || ""))
+      return " — Fix: open the link above, press Enable on the Google Sheets API, wait a minute and try again.";
     return /external_request|UrlFetchApp|authoriz|pahintulot/i.test(msg || "")
       ? " — Fix: in Apps Script, choose the “authorize” function, press Run and allow access, then deploy a new version." : "";
   }
