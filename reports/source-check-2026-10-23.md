@@ -101,3 +101,24 @@ C84 Bulldoxer→Bulldozer · C83 "2,5 -3.0"→"2.5-3.0" · C93 Excavato→Excava
 - Region VII form: unit count printed 42; its lines add to 43.
 - Unrealistic specs that are really in the forms (so not sheet errors): Pangasinan 2nd "Tank Capacity 400L" vacuum truck; Ilocos Sur 2nd 600L jetting truck; Ilocos Norte 1st / Ilocos Sur 1st "Vacuum Truck – Flood, 200 mm discharge"; Ilocos Sur 1st wheel excavator with "Loader Capacity 1.00"; La Union 2nd long-arm with 2.0 cu.m bucket; Cavite 3rd backhoe "7 kg"; Region VII/Cebu long-arm 4.5 cu.m buckets and ₱2M 20 cu.m dump trucks; Davao de Oro 2nd "1 cu.m" vacuum cleaner; Davao del Norte 2nd wheel excavator with 15-18 m reach; Northern Samar dump truck with "15-18 m Reach" and "1 cu.mtrs" boom truck.
 - Region VI and NIR "duplicate" rows are real: each unit is for a different river.
+
+## 6. Region VIII unit costs (applied 23 Oct 2026)
+
+The Region VIII form has no prices, so each item was priced from the same equipment type and size class in other regions' verified forms (median where several match). Quantities follow the Region VIII form. **Note:** a row was inserted at 303, so every row reference below old row 302 in sections 3–4 is now one higher.
+
+| Equipment | Unit cost | Comparables |
+|---|---|---|
+| Multi-Purpose Amphibious Dredge | ₱90,000,000 | IV-A ₱75M · I ₱81M · II ₱90M · VII ₱90M · V ₱112M |
+| Amphibious Excavator LR 25–30 MT, 15–18 m | ₱33,500,000 | XII ₱12M · NIR ₱26M · XIII ₱32M · XI ₱35M / ₱38.5M · I ₱55M |
+| Amphibious Excavator LR 14–16 MT | ₱24,000,000 | NIR ₱24M (14-ton) · XIII ₱24M (16–18 t) |
+| Hydraulic Excavator Crawler LR | ₱13,500,000 | I ₱12M / ₱24M · XIII ₱12M · XI ₱12M · NIR ₱15M ×2 |
+| Mini-Amphibious Excavator | ₱15,000,000 | I ₱9M · VII ₱15M ×2 |
+| Bulldozer | ₱11,500,000 | IV-B ₱11.48M ×2 / ₱11.5M · I ₱16M / ₱20M |
+| Dump Truck 3 cu.m | ₱4,550,000 | 8 trucks in NCR and Region I, ₱4.43M–₱5.6M |
+| Wheel Excavator DX190WA | ₱6,000,000 | NCR ₱6M ×2 · I ₱9M |
+| Boom Truck | ₱9,000,000 | median of 11 boom trucks |
+| Dump Truck Hino 3-way | ₱8,300,000 | XI 3-way dump trucks ₱8.3M ×2 |
+| Pay Loader 20 MT | ₱12,000,000 | I payloaders 16–20 t ₱12M |
+| Amphibious Excavator 1.5 cu.m, 10 m | ₱55,000,000 | IV-A ₱55M (same spec) |
+
+Written to the sheet: rows 299–324 (quantity and unit cost; dredges 3→6, bulldozers 1→2), new row 303 for form item 5 (Amphibious Excavator LR 25–30 MT, 1 × ₱33.5M), F322 converted from text to a number, and G299 = ₱1,821,100,000 (was ₱1,438,705,000; Drive link kept). TOTAL row is now ₱13,360,626,680. Region VIII's two Mini-Amphibious lines with blank quantity (Mirang and Lirang Creek) still need confirmation; each extra unit adds ₱15,000,000.
