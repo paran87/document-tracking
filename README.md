@@ -11,6 +11,8 @@ A static website that presents the **REQ. FUND (EQUIPMENT)** sheet of
 - **Records table** — grouped by region/office or as a flat list; sortable, searchable, exportable to CSV, printable.
 - **Source data issues** — an automatic audit of the Google Sheet, re-run on every load: wrong Qty × Unit Price calculations, missing prices, a TOTAL row and region totals that do not match their line items, totals typed on the wrong row or split across cells, possible duplicate rows, the same item priced differently, missing offices, incomplete descriptions, spelling errors, stray spaces and inconsistent peso formatting. Each issue shows its severity, sheet row (with a link to it), expected vs. actual value and peso impact, and can be exported to CSV. Affected rows are highlighted in the records table, which can be limited to rows with issues.
 
+- **Equipment reality check** — flags entries whose name or specification cannot exist in real equipment (e.g. a 400 L vacuum truck, a long-arm excavator with a 4.5 cu.m bucket, a dump truck with a “15–18 m reach”, a 7 kg backhoe, a “flood vacuum truck”) and shows why, plus a suggested corrected entry. The rules live in `REALITY_RULES` in `assets/app.js` and are based on typical manufacturer specifications; suggestions should be confirmed with the requesting office.
+
 Filters are kept in the URL, so a filtered view can be shared as a link.
 
 ## Data

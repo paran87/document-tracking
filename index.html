@@ -109,6 +109,21 @@
         </div>
       </div>
       <div class="issue-summary" id="issueSummary"></div>
+      <article class="card reality">
+        <header class="card-head">
+          <div>
+            <h3>Equipment reality check</h3>
+            <p class="muted small">Entries whose name or specification does not exist in real equipment, each with a suggested correction. Based on typical manufacturer specifications, so confirm with the requesting office before changing the sheet.</p>
+          </div>
+          <span class="pill" id="realityCount"></span>
+        </header>
+        <div class="reality-wrap">
+          <table class="reality-table">
+            <thead><tr><th>Where</th><th>As written in the sheet</th><th>Why it's not realistic</th><th>Suggested correction</th></tr></thead>
+            <tbody id="realityBody"></tbody>
+          </table>
+        </div>
+      </article>
       <div class="grid-issues">
         <div>
           <div class="issue-filters">

@@ -182,8 +182,12 @@
     "typo": ["minor", "Spelling error"],
     "format": ["minor", "Inconsistent formatting"],
     "whitespace": ["minor", "Extra spaces / line breaks"],
-    "empty-row": ["minor", "Blank row inside data"]
+    "empty-row": ["minor", "Blank row inside data"],
+    "nonexistent": ["critical", "Equipment doesn't exist as described"],
+    "misnamed": ["warning", "Wrong equipment name"],
+    "implausible": ["warning", "Unrealistic specification"]
   };
+  var REALITY_TYPES = ["nonexistent", "misnamed", "implausible"];
   var SEVERITY = { critical: "Critical", warning: "Warning", minor: "Minor" };
   var SEV_ORDER = { critical: 0, warning: 1, minor: 2 };
 
@@ -192,7 +196,7 @@
     [/\bamphbious\b/i, "Amphibious"], [/\bpoontons?\b/i, "Pontoon"], [/\bvaccuum\b/i, "Vacuum"],
     [/\bbulldoxer\b/i, "Bulldozer"], [/\bwate\b/i, "Water"], [/\bcrawle\b/i, "Crawler"],
     [/\battachmet\b/i, "Attachment"], [/\bmultipurpise\b/i, "Multipurpose"], [/\baccesories\b/i, "Accessories"],
-    [/\bwatermastr\b/i, "Watermaster"], [/\bmitigating flood\b/i, "Mitigating Equipment"]
+    [/\bwatermastr\b/i, "Watermaster"]
   ];
   var MONEY_FMT = /^₱\d{1,3}(,\d{3})*\.\d{2}$/;
 
@@ -203,6 +207,205 @@
   }
   function itemKey(eq) {
     return eq.toLowerCase().replace(/[–—]/g, "-").replace(/\s+/g, " ").replace(/\s*-\s*/g, " - ").trim();
+  }
+
+
+  // ---------- Equipment reality check ----------
+  // Each rule looks at one equipment description and, when the machine or its
+  // specification cannot exist as written, returns why and a suggested fix.
+  var CUM = "(?:cu\\.?\\s*m(?:trs?|ts?)?\\.?|m³|cbm)";
+  function cuM(e) {
+    var m = e.match(new RegExp("(\\d*\\.?\\d+)\\s*" + CUM + "(?!\\s*\\.?\\s*\\/)", "i"));
+    return m ? { value: parseFloat(m[1]), text: m[0] } : null;
+  }
+  function litres(e) {
+    if (/cylinder|engine/i.test(e)) return null;
+    var m = e.match(/(\d[\d,]*(?:\.\d+)?)\s*-?\s*(?:l|liters?|litres?)\b(?!\s*\/\s*min)/i);
+    if (m) return { value: num(m[1]), text: m[0] };
+    var c = cuM(e);
+    return c ? { value: c.value * 1000, text: c.text, cum: true } : null;
+  }
+  function flowLpm(e) {
+    var m = e.match(/(\d[\d,]*)\s*(?:l|liters?|litres?)\s*\/\s*min(?:ute)?/i);
+    return m ? { value: num(m[1]), text: m[0] } : null;
+  }
+  function reachM(e) {
+    var m = e.match(/(\d+(?:\.\d+)?)\s*(?:[-–]\s*(\d+(?:\.\d+)?))?\s*m(?:tr)?\.?\s*reach/i);
+    return m ? { value: parseFloat(m[2] || m[1]), text: m[0] } : null;
+  }
+  var isLongReach = /long[- ]?(arm|reach)|\bLR\b/i;
+
+  var REALITY_RULES = [
+    function (e) {
+      if (!/dump/i.test(e) || /excavat|backho/i.test(e) || !reachM(e)) return null;
+      return { kind: "nonexistent",
+        why: "A dump truck has no boom, so it cannot have a “" + reachM(e).text + "”. The tonnage/reach text looks copied from an excavator row.",
+        fix: e.slice(0, e.lastIndexOf(" - ") > 0 ? e.lastIndexOf(" - ") : e.length).trim() + " – 3–6 cu. m dump box", note: "Confirm the actual dump-box capacity with the office." };
+    },
+    function (e) {
+      if (!/boom truck|crane/i.test(e) || /excavat/i.test(e) || !cuM(e)) return null;
+      return { kind: "nonexistent",
+        why: "Boom trucks and cranes are rated by lifting capacity in tons, not by volume. “" + cuM(e).text + "” is not a boom-truck specification.",
+        fix: e.replace(cuM(e).text, "5–10 ton lifting capacity"), note: "Confirm the needed lifting capacity." };
+    },
+    function (e) {
+      var m = e.match(/operating weight[:\s]*(\d+(?:\.\d+)?)\s*kg/i);
+      if (!m || parseFloat(m[1]) >= 500 || !/backho|excavat|loader/i.test(e)) return null;
+      return { kind: "nonexistent",
+        why: "No backhoe or excavator weighs " + m[1] + " kg. The smallest mini excavators weigh about 1,000 kg.",
+        fix: e.replace(/\s*\(as indicated in source\)/i, "").replace(m[1] + " kg", m[1] + " tons (" + int.format(parseFloat(m[1]) * 1000) + " kg)"),
+        note: "Most likely a missing “t” (tons)." };
+    },
+    function (e) {
+      if (!/vacuum|vaccuum|jetting|sewer jet|jet cleaner|sewer cleaner/i.test(e)) return null;
+      var l = litres(e);
+      if (!l) return null;
+      if (l.value < 2000) {
+        return { kind: "nonexistent",
+          why: "Truck-mounted vacuum / sewer-jetting units carry about 2,000–10,000 L. A " + int.format(l.value) + " L tank is the size of a trailer pressure washer, not a vacuum truck.",
+          fix: e.replace(l.text, l.cum ? "4 cu.m" : "4,000 L"), note: "Other offices in this sheet request 4 cu.m (4,000 L) units." };
+      }
+      if (l.cum && l.value > 20000 && /each/i.test(e)) {
+        return { kind: "implausible",
+          why: "Two " + l.text + " tanks (sludge + water) would weigh about " + Math.round(l.value * 2 / 1000) + " tons when full, far more than any road-legal truck can carry.",
+          fix: e.replace(l.text, (l.value / 10000) + " cu.m"), note: "Very likely a typo for " + (l.value / 10000) + " cu.m, the figure other offices use." };
+      }
+      return null;
+    },
+    function (e) {
+      if (!isLongReach.test(e) || /amph/i.test(e) || !/excavat|backho|crawler/i.test(e)) return null;
+      var b = cuM(e);
+      if (!b || b.value <= 1.2) return null;
+      return { kind: "nonexistent",
+        why: "Long-arm / long-reach excavators trade bucket size for reach. Their buckets are about 0.25–0.8 cu.m. A " + b.value + " cu.m bucket on a long arm is not offered by any manufacturer.",
+        fix: e.replace(b.text, "0.5 cu.m"),
+        note: "If a " + b.value + " cu.m bucket is really needed, request a standard (short-arm) excavator instead." };
+    },
+    function (e) {
+      if (!/amph/i.test(e) || /dredg/i.test(e)) return null;
+      var b = cuM(e);
+      if (!b || b.value <= 1.0) return null;
+      return { kind: "implausible",
+        why: "Amphibious (pontoon) excavators carry buckets of about 0.2–1.0 cu.m. A bigger bucket would tip the pontoons, and " + b.value + " cu.m is not offered.",
+        fix: e.replace(b.text, "0.8 cu.m"), note: "Confirm the bucket size with the office." };
+    },
+    function (e) {
+      if (!/wheel/i.test(e) || !/excavat/i.test(e) || /loader/i.test(e)) return null;
+      var b = cuM(e), r = reachM(e);
+      if (r && r.value >= 13) {
+        return { kind: "implausible",
+          why: "Wheeled excavators reach about 8–10 m (long-arm versions about 12 m). A " + r.text + " is only possible on a crawler long-reach excavator.",
+          fix: e.replace(r.text, isLongReach.test(e) ? "up to 12 m reach" : "9–10 m reach"), note: "Or change the machine to “Long-Reach Crawler Excavator” if the 15–18 m reach is required." };
+      }
+      if (b && b.value > 1.2) {
+        return { kind: "implausible",
+          why: "Wheeled excavators use buckets up to about 1.0 cu.m. A " + b.value + " cu.m bucket is a 30-ton-plus crawler excavator size.",
+          fix: e.replace(b.text, "0.9 cu.m"), note: "" };
+      }
+      return null;
+    },
+    function (e) {
+      if (!/excavat/i.test(e) || !/loader capacity/i.test(e)) return null;
+      var b = e.match(/bucket capacity[:\s]*(\d*\.?\d+)/i), l = e.match(/loader capacity\s*(\d*\.?\d+)/i);
+      return { kind: "nonexistent",
+        why: "An excavator has no loader bucket. “Bucket + Loader capacity” is a backhoe-loader specification copied into an excavator row.",
+        fix: "Backhoe Loader, Wheel Type – Backhoe bucket " + (b ? b[1] : "0.2") + " cu.m; Loader bucket " + (l ? l[1] : "1.0") + " cu.m",
+        note: "Or keep the excavator and give its real bucket size (e.g. 0.59 cu.m, as in the row above)." };
+    },
+    function (e) {
+      var b = e.match(/backho\w*\s*bucket\s*(\d*\.?\d+)\s*(m³|cu\.?\s*m)?/i), l = e.match(/loader\s*bucket\s*(\d*\.?\d+)\s*(m³|cu\.?\s*m)?/i);
+      if (!b || !l || parseFloat(b[1]) <= parseFloat(l[1])) return null;
+      return { kind: "implausible",
+        why: "On a backhoe loader the rear backhoe bucket (about 0.1–0.3 cu.m) is smaller than the front loader bucket (about 0.8–1.2 cu.m). The two values look swapped.",
+        fix: e.replace(/backho\w*\s*bucket\s*\d*\.?\d+\s*(m³|cu\.?\s*m)?/i, "Backhoe Bucket " + l[1] + " m³").replace(/loader\s*bucket\s*\d*\.?\d+\s*(m³|cu\.?\s*m)?/i, "Loader Bucket " + b[1] + " m³"),
+        note: "" };
+    },
+    function (e) {
+      if (!/vacuum truck/i.test(e) || !/flood/i.test(e)) return null;
+      var d = e.match(/(\d+)\s*mm/i);
+      return { kind: "nonexistent",
+        why: "A vacuum truck sucks sludge into a tank. It has no flood-discharge outlet, and a “flood vacuum truck” is not a real machine. The 200 mm discharge describes a truck-mounted flood (dewatering) pump.",
+        fix: "Truck-Mounted Flood Mitigating Pump – " + (d ? d[1] + " mm (" + Math.round(d[1] / 25) + "-inch) discharge" : "8-inch discharge"), note: "" };
+    },
+    function (e) {
+      if (!/mitigating flood\b/i.test(e)) return null;
+      return { kind: "misnamed",
+        why: "“Flood Mitigating Flood” is not an equipment name. The flow-rate spec shows this is a flood-mitigating pump.",
+        fix: e.replace(/trailer\s*\/\s*mobile flood mitigating flood/i, "Trailer-Mounted Mobile Flood Mitigating Pump").replace(/mitigating flood\b/i, "Mitigating Pump"), note: "" };
+    },
+    function (e) {
+      if (!/rotary wheel excavator|bucket[- ]wheel excavator/i.test(e)) return null;
+      var b = cuM(e);
+      if (b && b.value >= 5) return null;
+      return { kind: "misnamed",
+        why: "A rotary / bucket-wheel excavator is a giant open-pit mining machine weighing thousands of tons. With a " + (b ? b.value + " cu.m" : "small") + " bucket, this is a wheel-type (rubber-tired) hydraulic excavator.",
+        fix: "Hydraulic Excavator, Wheel Mounted" + (b ? " (" + b.text + ")" : ""), note: "" };
+    },
+    function (e) {
+      if (!/\bvector\b/i.test(e)) return null;
+      return { kind: "misnamed",
+        why: "“Vector” is not an equipment type. The intended item is a combination sewer-cleaner truck, often called by the brand name Vactor®.",
+        fix: e.replace(/vector sewer cleaner truck/i, "Combination Sewer Jet and Vacuum Truck").replace(/\bvector\b/i, "Combination"), note: "" };
+    },
+    function (e) {
+      if (!/^loader excavator/i.test(e)) return null;
+      return { kind: "misnamed",
+        why: "“Loader excavator” is not a standard machine type. A wheel machine with both a loader and a digging bucket is a backhoe loader.",
+        fix: e.replace(/^loader excavator,?\s*wheel mounted/i, "Backhoe Loader, Wheel Type").replace(/^loader excavator/i, "Backhoe Loader"), note: "" };
+    },
+    function (e) {
+      if (!/^crawler\s*(type)?\s*(long arm|lr)\b/i.test(e) || /excavat|backho/i.test(e)) return null;
+      return { kind: "misnamed",
+        why: "The machine type is missing: “crawler long arm” is an excavator configuration, not a machine by itself.",
+        fix: e.replace(/^crawler\s*(type)?\s*(long arm|lr)\b/i, "Long-Reach Crawler Excavator"), note: "" };
+    },
+    function (e) {
+      if (!/boom crane/i.test(e) || !/person/i.test(e)) return null;
+      return { kind: "misnamed",
+        why: "A 2-person / 200 kg bucket with 24 m lifting height is an aerial manlift (bucket truck) for people, not a crane for lifting loads.",
+        fix: "Truck-Mounted Aerial Manlift (Bucket Truck) – 2-person, 200 kg basket; 24 m working height; 360° slewing", note: "" };
+    },
+    function (e) {
+      var m = e.match(/(\d+(?:\.\d+)?)\s*metric tons?\s*crane capacity/i);
+      if (!m || !/self[- ]?loading/i.test(e) || parseFloat(m[1]) < 25) return null;
+      return { kind: "implausible",
+        why: "Truck-mounted (knuckle-boom) self-loading cranes lift about 3–15 t. " + m[1] + " t needs a separate all-terrain crane worth ₱50M+. The figure is most likely the crane's moment rating in tonne-metres.",
+        fix: e.replace(m[0], m[1] + " t·m crane moment (≈10–15 t max lift)"), note: "Confirm with the office whether " + m[1] + " is t·m." };
+    },
+    function (e) {
+      var m = e.match(/(\d+)\s*hp\s*single[- ]cylinder/i) || e.match(/(\d+)\s*-?\s*hp[^)]*single[- ]cylinder/i);
+      if (!m || parseFloat(m[1]) <= 20) return null;
+      return { kind: "implausible",
+        why: "Single-cylinder diesel engines top out at about 10–15 hp. A " + m[1] + " hp pump needs a multi-cylinder engine.",
+        fix: e.replace(/single[- ]cylinder/i, "Multi-Cylinder"), note: "Or cap the range at 15 hp if a single-cylinder pump is intended." };
+    },
+    function (e) {
+      if (!/pump/i.test(e) || !/truck|high[- ]capacity|flood/i.test(e)) return null;
+      var f = flowLpm(e);
+      if (!f || f.value >= 3000) return null;
+      return { kind: "implausible",
+        why: "Flood-mitigation and “high-capacity” pumps in this sheet move 9–30 cu.m/min. " + f.text + " (" + (f.value / 1000) + " cu.m/min) is a small portable-pump rating and would barely dent a flooded road.",
+        fix: e.replace(f.text, "9,000 L/min (9 cu.m/min)"), note: "Keep the original only if a small portable pump is really what is needed." };
+    }
+  ];
+
+  var KIND_ORDER = { nonexistent: 0, misnamed: 1, implausible: 2 };
+  // Rules run one after another on the progressively corrected text, so a row
+  // that breaks several rules gets one combined suggestion.
+  function realityCheck(e) {
+    var cur = e, why = [], notes = [], kind = null;
+    REALITY_RULES.forEach(function (rule) {
+      var x = rule(cur);
+      if (!x) return;
+      why.push(x.why);
+      if (x.note) notes.push(x.note);
+      if (!kind || KIND_ORDER[x.kind] < KIND_ORDER[kind]) kind = x.kind;
+      cur = x.fix;
+    });
+    if (!kind) return null;
+    TYPOS.forEach(function (t) { cur = cur.replace(t[0], t[1]); });
+    cur = cur.replace(/\s+/g, " ").trim();
+    return { kind: kind, why: why.join(" "), fix: cur, note: notes.join(" ") };
   }
 
   function audit(d) {
@@ -418,6 +621,18 @@
         detail: rows.length + " row(s) use a format like “" + g.sample + "” instead of “₱1,000,000.00” (extra spaces). They may be stored as text rather than numbers, which breaks SUM formulas."
       });
     });
+    // 9. Equipment that cannot exist as described
+    recs.forEach(function (r) {
+      var x = realityCheck(r.equipment);
+      if (!x) return;
+      add(x.kind, {
+        region: r.region, office: r.office, rows: [r.sheetRow], recs: [r],
+        title: r.equipment, detail: x.why,
+        suggestion: x.fix, suggestionNote: x.note
+      });
+      r.suggestion = x.fix;
+    });
+
     d.emptyRows.forEach(function (row) {
       add("empty-row", { region: "", office: "", rows: [row], title: "Blank row " + row, detail: "An empty row inside the table can break filters, sorting and range-based formulas." });
     });
@@ -651,7 +866,8 @@
     return '<tr' + (sev ? ' class="has-issue sev-' + sev + '"' : "") + ">" +
       '<td class="c-region">' + esc(r.region) + "</td>" +
       '<td class="c-office">' + esc(r.office) + "</td>" +
-      '<td class="eq"><strong>' + esc(r.name) + flag + "</strong>" + (r.spec ? "<span>" + esc(r.spec) + "</span>" : "") + "</td>" +
+      '<td class="eq"><strong>' + esc(r.name) + flag + "</strong>" + (r.spec ? "<span>" + esc(r.spec) + "</span>" : "") +
+      (r.suggestion ? '<em class="sugg">Suggested: ' + esc(r.suggestion) + "</em>" : "") + "</td>" +
       '<td class="c-cat"><span class="tag">' + esc(r.category) + "</span></td>" +
       '<td class="num c-qty">' + int.format(r.qty) + "</td>" +
       '<td class="num c-unit">' + (r.unit ? money(r.unit) : "—") + "</td>" +
@@ -715,6 +931,7 @@
       '<div class="issue-top"><span class="sev">' + SEVERITY[i.severity] + '</span><span class="itype">' + esc(i.label) + "</span>" +
       (loc ? '<span class="loc">' + esc(loc) + "</span>" : "") + "</div>" +
       "<h4>" + esc(i.title) + "</h4><p>" + esc(i.detail) + "</p>" + cmp +
+      (i.suggestion ? '<div class="fix"><small>Suggested correction</small><b>' + esc(i.suggestion) + "</b>" + (i.suggestionNote ? "<span>" + esc(i.suggestionNote) + "</span>" : "") + "</div>" : "") +
       (i.rows.length ? '<a class="open-row" target="_blank" rel="noopener" href="' + sheetLink(Math.min.apply(null, i.rows), Math.max.apply(null, i.rows)) + '">' + rows + ' · open in Google Sheets ↗</a>' : "") +
       "</article>";
   }
@@ -732,7 +949,7 @@
       return '<button type="button" class="isum sev-' + k + (state.sev === k ? " is-on" : "") + '" data-sev="' + k + '"><span class="isum-n">' + counts[k] + '</span><span class="isum-l">' + SEVERITY[k] + "</span><span class=\"isum-d\">" + desc + "</span></button>";
     };
     $("issueSummary").innerHTML =
-      sevCard("critical", "wrong math, missing values, totals that don't add up") +
+      sevCard("critical", "wrong math, missing values, totals that don't add up, equipment that can't exist") +
       sevCard("warning", "duplicates, conflicting prices, unclear entries") +
       sevCard("minor", "typos, spacing and formatting") +
       '<div class="isum impact"><span class="isum-n">' + (g ? signed(g.impact) : "₱0") + '</span><span class="isum-l">TOTAL row error</span><span class="isum-d">' +
@@ -746,6 +963,15 @@
       return '<option value="' + t + '"' + (t === state.itype ? " selected" : "") + ">" + esc(ISSUE_TYPES[t][1]) + " (" + n + ")</option>";
     }).join("");
     $("issueScopeWrap").hidden = !(state.region || state.office);
+
+    var real = all.filter(function (i) { return REALITY_TYPES.indexOf(i.type) >= 0 && issueMatches(i, "sev") && issueMatches(i, "itype"); });
+    $("realityCount").textContent = real.length + (real.length === 1 ? " entry" : " entries");
+    $("realityBody").innerHTML = real.length ? real.map(function (i) {
+      return '<tr class="sev-' + i.severity + '"><td class="r-row"><a href="' + sheetLink(i.rows[0]) + '" target="_blank" rel="noopener">Row ' + i.rows[0] + "</a><span>" + esc(i.region) + "<em>" + esc(i.office) + "</em></span></td>" +
+        '<td class="r-asis"><span class="r-kind">' + esc(i.label) + "</span><s>" + esc(i.title) + "</s></td>" +
+        '<td class="r-why">' + esc(i.detail) + "</td>" +
+        '<td class="r-fix"><b>' + esc(i.suggestion) + "</b>" + (i.suggestionNote ? "<span>" + esc(i.suggestionNote) + "</span>" : "") + "</td></tr>";
+    }).join("") : '<tr><td colspan="4" class="empty">No unrealistic equipment found' + (state.region ? " in " + esc(state.region) : "") + ".</td></tr>";
 
     var list = all.filter(function (i) { return issueMatches(i); });
     $("issues").innerHTML = list.length
@@ -782,14 +1008,15 @@
     var g = iss.filter(function (i) { return i.type === "grand-total"; })[0];
     $("alert").hidden = !iss.length;
     $("alert").innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2zM12 10v5M12 18v.5"/></svg><span><b>' + iss.length + " issues found in the source sheet</b> — " + crit + " critical" +
-      (g ? ", including a TOTAL row that is off by " + compact(Math.abs(g.impact)) : "") + '.</span><span class="alert-cta">Review issues →</span>';
+      (g ? ", including a TOTAL row that is off by " + compact(Math.abs(g.impact)) : "") +
+      (function () { var n = iss.filter(function (i) { return REALITY_TYPES.indexOf(i.type) >= 0; }).length; return n ? ", and " + n + " equipment entries that can't exist as written" : ""; })() + '.</span><span class="alert-cta">Review issues →</span>';
   }
 
   function exportIssues() {
-    var head = ["Severity", "Issue", "Region", "Implementing Office", "Sheet rows", "Item", "Details", "Should be", "Sheet shows", "Difference"];
+    var head = ["Severity", "Issue", "Region", "Implementing Office", "Sheet rows", "Item", "Details", "Should be", "Sheet shows", "Difference", "Suggested correction"];
     var list = state.audit.issues.filter(function (i) { return issueMatches(i); });
     download("okb-source-issues.csv", [head].concat(list.map(function (i) {
-      return [SEVERITY[i.severity], i.label, i.region, i.office, i.rows.join(" "), i.title, i.detail, i.expected || "", i.found || "", i.impact || ""];
+      return [SEVERITY[i.severity], i.label, i.region, i.office, i.rows.join(" "), i.title, i.detail, i.expected || "", i.found || "", i.impact || "", i.suggestion ? i.suggestion + (i.suggestionNote ? " (" + i.suggestionNote + ")" : "") : ""];
     })));
   }
 
@@ -846,9 +1073,9 @@
 
   function exportCsv() {
     var rows = sorted(filtered());
-    var head = ["Region", "Implementing Office", "Equipment", "Category", "Qty", "Unit Price", "Total Cost", "Sheet Row", "Issues"];
+    var head = ["Region", "Implementing Office", "Equipment", "Category", "Qty", "Unit Price", "Total Cost", "Sheet Row", "Issues", "Suggested correction"];
     download("okb-equipment" + (state.region ? "-" + state.region.replace(/\W+/g, "-") : "") + ".csv", [head].concat(rows.map(function (r) {
-      return [r.region, r.office, r.equipment, r.category, r.qty, r.unit, r.total, r.sheetRow, r.issues.map(function (i) { return i.label; }).join("; ")];
+      return [r.region, r.office, r.equipment, r.category, r.qty, r.unit, r.total, r.sheetRow, r.issues.map(function (i) { return i.label; }).join("; "), r.suggestion || ""];
     })));
   }
 
@@ -965,5 +1192,5 @@
   load();
 
   // Exposed for tests.
-  window.OKB = { parseCSV: parseCSV, normalize: normalize, audit: audit, categorize: categorize, state: state };
+  window.OKB = { parseCSV: parseCSV, normalize: normalize, audit: audit, realityCheck: realityCheck, categorize: categorize, state: state };
 })();
