@@ -122,3 +122,13 @@ The Region VIII form has no prices, so each item was priced from the same equipm
 | Amphibious Excavator 1.5 cu.m, 10 m | ₱55,000,000 | IV-A ₱55M (same spec) |
 
 Written to the sheet: rows 299–324 (quantity and unit cost; dredges 3→6, bulldozers 1→2), new row 303 for form item 5 (Amphibious Excavator LR 25–30 MT, 1 × ₱33.5M), F322 converted from text to a number, and G299 = ₱1,821,100,000 (was ₱1,438,705,000; Drive link kept). TOTAL row is now ₱13,360,626,680. Region VIII's two Mini-Amphibious lines with blank quantity (Mirang and Lirang Creek) still need confirmation; each extra unit adds ₱15,000,000.
+
+## 7. Remaining corrections applied (23 Oct 2026)
+
+All verified corrections from section 3 are now in the sheet (row numbers below old row 302 are +1 because of the row inserted in section 6). Every target cell was checked against its expected old value immediately before writing; a before/after comparison shows exactly these cells changed and nothing else.
+
+- **Descriptions / offices (41 cells):** C72, C83, C84, C93, C100, B155 + B158 (Region II "Additional" block now starts at row 155), C163, C170, C182, B183 + C183 (Payloader moved to **Palawan 1st DEO**; the merged Mindoro Oriental office cell now spans rows 181–182 only), C186, C196, C248–C256, C285, C312, C353, C357, C360, C366, C371, C373, C383–C385, C393, C397, C402, C403, C415, C421–C423.
+- **Price:** E382 ₱15,500,000 → ₱15,000,000 (Davao del Norte 2nd prime mover; F382 follows by formula).
+- **Totals:** G6 NCR ₱981,565,000 converted from text to a number; G69 Region I → ₱1,406,810,000; G210 Region IV-A → ₱1,023,500,000; G350 Region XI → ₱1,728,975,500. Drive links on all four cells were re-attached after writing.
+
+**TOTAL row (G434): ₱14,415,691,680** (₱12,978,231,680 before this check). The line items add up to ₱14,541,636,680; the remaining ₱125,945,000 difference is exactly the two unresolved cases in section 4: CAR Apayao 2nd (₱75,000,000 — memo summary vs. its own spec) and Region X (₱50,945,000 — source folder empty).
