@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OKB Equipment Tracker</title>
+  <meta name="description" content="Oplan Kontra Baha — consolidated heavy equipment requirement and requested funds, by region, implementing office and equipment type.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b2a4a'/%3E%3Cpath d='M4 19c3 0 3-2.5 6-2.5s3 2.5 6 2.5 3-2.5 6-2.5 3 2.5 6 2.5' stroke='%23f7941d' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3Cpath d='M4 25c3 0 3-2.5 6-2.5s3 2.5 6 2.5 3-2.5 6-2.5 3 2.5 6 2.5' stroke='%234fc3f7' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3Cpath d='M16 5l6 8H10z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <a class="skip" href="#records">Skip to records</a>
+
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#top" aria-label="Oplan Kontra Baha home">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0b2a4a"/><path d="M4 19c3 0 3-2.5 6-2.5s3 2.5 6 2.5 3-2.5 6-2.5 3 2.5 6 2.5" stroke="#f7941d" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M4 25c3 0 3-2.5 6-2.5s3 2.5 6 2.5 3-2.5 6-2.5 3 2.5 6 2.5" stroke="#4fc3f7" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M16 5l6 8H10z" fill="#fff"/></svg>
+        <span class="brand-text"><strong>Oplan Kontra Baha</strong><small>Equipment Requirement Tracker</small></span>
+      </a>
+      <nav class="topnav" aria-label="Sections">
+        <a href="#overview">Overview</a>
+        <a href="#regions">Regions</a>
+        <a href="#records">Records</a>
+        <a href="#checks">Data checks</a>
+      </nav>
+      <div class="top-actions">
+        <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" id="top">
+    <div class="wrap">
+      <p class="eyebrow">DPWH · Oplan Kontra Baha</p>
+      <h1>Consolidated Heavy Equipment Requirement</h1>
+      <p class="lede">Every piece of equipment requested for flood mitigation, by region and implementing office — with totals that update straight from the source spreadsheet.</p>
+      <div class="status-row">
+        <span class="status" id="status"><span class="dot"></span><span id="statusText">Loading data…</span></span>
+        <button class="btn btn-ghost" id="refreshBtn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>Refresh
+        </button>
+        <a class="btn btn-ghost" id="sheetLink" target="_blank" rel="noopener" href="https://docs.google.com/spreadsheets/d/1KnQQnvU5NlFypK7k4zLJ9ni45eDvdHh2nPoUNkij5gc/edit?gid=1674923681#gid=1674923681">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>Open spreadsheet
+        </a>
+      </div>
+      <div class="kpis" id="kpis" aria-live="polite"></div>
+    </div>
+    <svg class="hero-wave" viewBox="0 0 1440 80" preserveAspectRatio="none" aria-hidden="true"><path d="M0 40c120 26 240 26 360 0s240-26 360 0 240 26 360 0 240-26 360 0v40H0z"/></svg>
+  </section>
+
+  <div class="filterbar" id="filterbar">
+    <div class="wrap filter-inner">
+      <label class="field search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Search equipment, office…" autocomplete="off" aria-label="Search">
+      </label>
+      <label class="field"><span class="sr">Region</span><select id="fRegion" aria-label="Region"></select></label>
+      <label class="field"><span class="sr">Implementing office</span><select id="fOffice" aria-label="Implementing office"></select></label>
+      <label class="field"><span class="sr">Equipment category</span><select id="fCat" aria-label="Equipment category"></select></label>
+      <button class="btn btn-quiet" id="clearBtn" type="button" hidden>Clear filters</button>
+    </div>
+    <div class="wrap chips" id="chips"></div>
+  </div>
+
+  <main class="wrap">
+    <section id="overview" class="section">
+      <div class="section-head">
+        <h2>Overview</h2>
+        <p class="muted">Click any bar to filter the whole page.</p>
+      </div>
+      <div class="grid-2">
+        <article class="card">
+          <header class="card-head"><h3>Amount requested by region</h3><span class="muted small" id="regionChartNote"></span></header>
+          <div class="bars" id="regionBars"></div>
+        </article>
+        <article class="card">
+          <header class="card-head"><h3>Amount by equipment category</h3><span class="muted small">share of filtered total</span></header>
+          <div class="bars" id="catBars"></div>
+        </article>
+      </div>
+      <div class="grid-2">
+        <article class="card">
+          <header class="card-head"><h3>Top implementing offices</h3><span class="muted small">by amount</span></header>
+          <div class="bars" id="officeBars"></div>
+        </article>
+        <article class="card">
+          <header class="card-head"><h3>Most requested equipment</h3><span class="muted small">by units</span></header>
+          <div class="bars" id="equipBars"></div>
+        </article>
+      </div>
+    </section>
+
+    <section id="regions" class="section">
+      <div class="section-head">
+        <h2>Regions</h2>
+        <p class="muted">Select a region to drill into its offices and equipment.</p>
+      </div>
+      <div class="region-grid" id="regionGrid"></div>
+    </section>
+
+    <section id="records" class="section">
+      <div class="section-head row">
+        <div>
+          <h2>Records</h2>
+          <p class="muted" id="recordsNote"></p>
+        </div>
+        <div class="toolbar">
+          <div class="seg" role="group" aria-label="View">
+            <button type="button" class="seg-btn is-on" data-view="grouped">By office</button>
+            <button type="button" class="seg-btn" data-view="flat">Flat list</button>
+          </div>
+          <button class="btn" id="exportBtn" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Export CSV
+          </button>
+          <button class="btn" id="printBtn" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-2M7 14h10v6H7z"/></svg>Print
+          </button>
+        </div>
+      </div>
+      <div class="table-card">
+        <table class="data" id="table">
+          <thead>
+            <tr>
+              <th data-sort="region">Region</th>
+              <th data-sort="office">Implementing office</th>
+              <th data-sort="equipment">Equipment</th>
+              <th data-sort="category">Category</th>
+              <th data-sort="qty" class="num">Qty</th>
+              <th data-sort="unit" class="num">Unit price</th>
+              <th data-sort="total" class="num">Total cost</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+          <tfoot id="tfoot"></tfoot>
+        </table>
+        <p class="empty" id="empty" hidden>No records match these filters.</p>
+      </div>
+    </section>
+
+    <section id="checks" class="section">
+      <div class="section-head">
+        <h2>Data checks</h2>
+        <p class="muted">Rows worth a second look in the source sheet. Totals on this page use each row's <em>Total Cost</em> as entered.</p>
+      </div>
+      <div class="grid-2">
+        <article class="card">
+          <header class="card-head"><h3>Line items to verify</h3><span class="pill" id="issueCount"></span></header>
+          <ul class="issues" id="issues"></ul>
+        </article>
+        <article class="card">
+          <header class="card-head"><h3>Region totals reconciliation</h3><span class="muted small">sum of rows vs. “Total Amount Requested”</span></header>
+          <div class="recon" id="recon"></div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p><strong>Source:</strong> “FLOOD PRONE AREAS &amp; REQ. FUND FOR EQUIPMENT” — sheet <em>REQ. FUND (EQUIPMENT)</em>. Data loads live from Google Sheets; if that is unreachable, the last saved snapshot is shown.</p>
+      <p class="muted small">Unofficial tracker for internal reference.</p>
+    </div>
+  </footer>
+
+  <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true" aria-labelledby="drawerTitle" role="dialog">
+    <header class="drawer-head">
+      <div>
+        <p class="eyebrow dark" id="drawerEyebrow">Region</p>
+        <h2 id="drawerTitle"></h2>
+      </div>
+      <button class="icon-btn" id="drawerClose" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>
