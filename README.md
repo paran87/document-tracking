@@ -29,7 +29,7 @@ Writes require the passcode; the history list is readable without it.
 
 Cell links (the Drive links on the region totals) are kept when a cell is rewritten. When an extra region total is emptied, its link moves to the region's total, or to the office name on that row if the total already has a link. The *Note* column in Fix History records where each link went.
 
-**Updating the script:** paste the new `Code.gs`, then **Deploy → Manage deployments → Edit → Version: New version → Deploy**, and allow the new permission (the script reads cell links through the Sheets API).
+**Updating the script:** paste the new `Code.gs`, choose the **authorize** function in the editor's toolbar and press **Run**, allow the permissions Google asks for (the script reads cell links through the Sheets API), then **Deploy → Manage deployments → Edit → Version: New version → Deploy**.
 
 ## Data
 

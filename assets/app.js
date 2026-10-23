@@ -1138,6 +1138,12 @@
   function a1(row, col) { return "ABCDEFG"[col - 1] + row; }
   function fixTypos(t) { TYPOS.forEach(function (x) { t = t.replace(x[0], x[1]); }); return t; }
 
+  // The script needs a one-time permission grant after it is updated.
+  function authHint(msg) {
+    return /external_request|UrlFetchApp|authoriz|pahintulot/i.test(msg || "")
+      ? " — Fix: in Apps Script, choose the “authorize” function, press Run and allow access, then deploy a new version." : "";
+  }
+
   function buildFixes() {
     var d = state.data, iss = state.audit.issues, list = [];
     if (!d) return list;
@@ -1365,7 +1371,7 @@
       setTimeout(load, 1500);
     }).catch(function (err) {
       fixState.busy = false;
-      fixState.error = "Could not apply fixes: " + err.message;
+      fixState.error = "Could not apply fixes: " + err.message + authHint(err.message);
       renderFix();
     });
   }
@@ -1430,7 +1436,7 @@
         setTimeout(load, 1500);
         window.alert(r.restored + " cell(s) restored.");
       })
-      .catch(function (e) { window.alert("Undo failed: " + e.message); });
+      .catch(function (e) { window.alert("Undo failed: " + e.message + authHint(e.message)); });
   }
 
   function bindFix() {

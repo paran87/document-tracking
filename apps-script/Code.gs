@@ -12,9 +12,10 @@
  *   4. Copy the Web app URL and paste it into the tracker's "Connect" dialog
  *      (or into assets/config.js so every visitor gets it).
  *
- * Updating an existing deployment: paste the new code, then Deploy → Manage
- * deployments → Edit (pencil) → Version: New version → Deploy, and allow the
- * new permissions when asked (cell links are read through the Sheets API).
+ * Updating an existing deployment: paste the new code, pick "authorize" in the
+ * function list above the editor and press Run, allow the permissions Google
+ * asks for (cell links are read through the Sheets API), then Deploy → Manage
+ * deployments → Edit (pencil) → Version: New version → Deploy.
  */
 
 var PASSCODE = 'change-me';             // required to apply or undo fixes
@@ -47,6 +48,13 @@ function doPost(e) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Run once from the editor after pasting this file: the web app can't ask for
+// new permissions itself, so this triggers Google's permission prompt.
+function authorize() {
+  var links = readLinks_(book_().getSheetByName(DATA_SHEET));
+  Logger.log('Authorized. ' + Object.keys(links).length + ' linked cells found.');
 }
 
 // ---------- Apply ----------
