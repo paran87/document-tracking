@@ -55,12 +55,15 @@
   </section>
 
   <div class="filterbar" id="filterbar">
+    <div class="wrap region-filter">
+      <span class="filter-label" id="regionLabel">Region</span>
+      <div class="region-pills" id="regionPills" role="group" aria-labelledby="regionLabel"></div>
+    </div>
     <div class="wrap filter-inner">
       <label class="field search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
         <input id="q" type="search" placeholder="Search equipment, office…" autocomplete="off" aria-label="Search">
       </label>
-      <label class="field"><span class="sr">Region</span><select id="fRegion" aria-label="Region"></select></label>
       <label class="field"><span class="sr">Implementing office</span><select id="fOffice" aria-label="Implementing office"></select></label>
       <label class="field"><span class="sr">Equipment category</span><select id="fCat" aria-label="Equipment category"></select></label>
       <button class="btn btn-quiet" id="clearBtn" type="button" hidden>Clear filters</button>

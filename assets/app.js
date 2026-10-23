@@ -715,7 +715,7 @@
   }
 
   function buildSelects() {
-    setOptions($("fRegion"), state.regions, "All regions", state.region);
+    renderRegionPills();
     var offices = [];
     state.all.forEach(function (r) {
       if ((!state.region || r.region === state.region) && offices.indexOf(r.office) < 0) offices.push(r.office);
@@ -723,6 +723,39 @@
     if (state.office && offices.indexOf(state.office) < 0) state.office = "";
     setOptions($("fOffice"), offices, state.region ? "All offices in " + state.region : "All implementing offices", state.office);
     setOptions($("fCat"), CATEGORIES.map(function (c) { return c[0]; }), "All equipment categories", state.cat);
+  }
+
+  // Short pill labels: "Region IV-B (MIMAROPA)" -> "IV-B", "NCR" stays "NCR".
+  function shortRegion(name) {
+    var m = name.match(/^region\s+([IVXL]+(?:-[AB])?)\b/i);
+    return m ? m[1].toUpperCase() : name.replace(/\s*\(.*\)$/, "");
+  }
+  var ROMAN = { I: 1, II: 2, III: 3, "IV-A": 4, "IV-B": 4.5, V: 5, VI: 6, NIR: 6.5, VII: 7, VIII: 8, IX: 9, X: 10, XI: 11, XII: 12, XIII: 13 };
+  function regionOrder(name) {
+    var k = shortRegion(name);
+    if (k === "CAR") return -2;
+    if (k === "NCR") return -1;
+    return ROMAN[k] != null ? ROMAN[k] : 99;
+  }
+  function renderRegionPills() {
+    var src = state.all.filter(function (r) { return match(r, "region"); });
+    var totals = {};
+    src.forEach(function (r) { totals[r.region] = (totals[r.region] || 0) + r.total; });
+    var crit = {};
+    state.audit.issues.forEach(function (i) { if (i.severity === "critical" && i.region) crit[i.region] = (crit[i.region] || 0) + 1; });
+    var regions = state.regions.slice().sort(function (a, b) { return regionOrder(a) - regionOrder(b); });
+    var pill = function (value, label, title, extra) {
+      var on = state.region === value;
+      return '<button type="button" class="rpill' + (on ? " is-on" : "") + (extra.dim ? " is-dim" : "") + '" data-pill="' + esc(value) + '" aria-pressed="' + on + '" title="' + esc(title) + '">' +
+        esc(label) + (extra.crit ? '<span class="rdot" aria-label="' + extra.crit + ' critical issues"></span>' : "") + "</button>";
+    };
+    $("regionPills").innerHTML = pill("", "All regions", "All regions · " + money(sum(src, "total")), {}) +
+      regions.map(function (name) {
+        var t = totals[name] || 0;
+        return pill(name, shortRegion(name), name + " · " + money(t) + (crit[name] ? " · " + crit[name] + " critical source issue(s)" : ""), { crit: crit[name], dim: !t });
+      }).join("");
+    var box = $("regionPills"), on = box.querySelector(".rpill.is-on");
+    if (on && box.scrollWidth > box.clientWidth) box.scrollLeft = on.offsetLeft - box.offsetLeft - (box.clientWidth - on.offsetWidth) / 2;
   }
 
   function setFilter(key, val) {
@@ -752,6 +785,7 @@
   // ---------- Render ----------
   function render() {
     var rows = filtered();
+    renderRegionPills();
     renderKpis(rows);
     renderChips();
     renderBars(rows);
@@ -1128,7 +1162,6 @@
       clearTimeout(t);
       t = setTimeout(function () { state.q = e.target.value.trim(); render(); }, 150);
     });
-    $("fRegion").addEventListener("change", function (e) { state.region = e.target.value; state.office = ""; buildSelects(); render(); });
     $("fOffice").addEventListener("change", function (e) { state.office = e.target.value; render(); });
     $("fCat").addEventListener("change", function (e) { state.cat = e.target.value; render(); });
     $("clearBtn").addEventListener("click", function () {
@@ -1153,6 +1186,14 @@
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && $("drawer").classList.contains("open")) closeDrawer(); });
 
     document.addEventListener("click", function (e) {
+      var pillEl = e.target.closest("[data-pill]");
+      if (pillEl) {
+        state.region = pillEl.getAttribute("data-pill");
+        state.office = "";
+        buildSelects();
+        render();
+        return;
+      }
       var el = e.target.closest("[data-k],[data-clear],[data-region],[data-apply-region],[data-view],[data-sev],[data-issue-row],th[data-sort]");
       if (!el) return;
       if (el.hasAttribute("data-sev")) { state.sev = state.sev === el.getAttribute("data-sev") ? "" : el.getAttribute("data-sev"); state.issueLimit = 25; render(); }
