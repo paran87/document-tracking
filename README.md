@@ -9,7 +9,7 @@ A static website that presents the **REQ. FUND (EQUIPMENT)** sheet of
 - **Overview charts** — amount by region, by equipment category, top implementing offices, most-requested equipment. Click any bar to filter the page.
 - **Region cards** — open a region to see each office's equipment, quantities and costs.
 - **Records table** — grouped by region/office or as a flat list; sortable, searchable, exportable to CSV, printable.
-- **Data checks** — rows where Qty × Unit Price ≠ Total Cost or prices are blank, and a reconciliation of computed region totals vs. the sheet's “Total Amount Requested” column.
+- **Source data issues** — an automatic audit of the Google Sheet, re-run on every load: wrong Qty × Unit Price calculations, missing prices, a TOTAL row and region totals that do not match their line items, totals typed on the wrong row or split across cells, possible duplicate rows, the same item priced differently, missing offices, incomplete descriptions, spelling errors, stray spaces and inconsistent peso formatting. Each issue shows its severity, sheet row (with a link to it), expected vs. actual value and peso impact, and can be exported to CSV. Affected rows are highlighted in the records table, which can be limited to rows with issues.
 
 Filters are kept in the URL, so a filtered view can be shared as a link.
 

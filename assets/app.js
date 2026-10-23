@@ -34,10 +34,19 @@
     office: "",
     cat: "",
     view: "grouped",
-    sort: { key: "", dir: 1 }
+    sort: { key: "", dir: 1 },
+    audit: { issues: [] },
+    issuesOnly: false,
+    sev: "",
+    itype: "",
+    issueScope: true,
+    issueLimit: 25
   };
 
   var $ = function (id) { return document.getElementById(id); };
+  function sheetLink(row, row2) {
+    return "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/edit#gid=" + GID + (row ? "&range=A" + row + ":G" + (row2 || row) : "");
+  }
 
   // ---------- Formatting ----------
   var peso = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", maximumFractionDigits: 0 });
@@ -106,27 +115,35 @@
     for (var i = 0; i < Math.min(rows.length, 10); i++) {
       if (/implementing office/i.test(rows[i][1] || "")) { start = i + 1; break; }
     }
-    var out = [], regions = [], declared = {}, grand = 0;
+    var out = [], regions = [], declared = {}, declaredCells = {}, regionFirstRow = {};
+    var grand = 0, grandRow = 0, emptyRows = [], rawCells = [];
     var region = "", office = "";
     for (var r = start; r < rows.length; r++) {
       var row = rows[r];
       var rg = clean(row[0]), of = clean(row[1]), eq = clean(row[2]);
       var decl = num(row[6]);
-      if (rg) { region = rg; office = ""; if (regions.indexOf(rg) < 0) regions.push(rg); }
+      var sheetRow = r + 1;
+      if (rg) { region = rg; office = ""; if (regions.indexOf(rg) < 0) { regions.push(rg); regionFirstRow[rg] = sheetRow; } }
       if (of) office = of;
+      if (rg || of || eq) rawCells.push({ row: sheetRow, region: region, office: office, cells: row });
       if (!eq) {
-        if (decl && !rg && !of) grand = decl;
+        if (decl && !rg && !of) { grand = decl; grandRow = sheetRow; }
+        else if (!row.some(function (c) { return clean(c); })) emptyRows.push(sheetRow);
         continue;
       }
       if (!region) continue;
-      if (decl) declared[region] = (declared[region] || 0) + decl;
+      if (decl) {
+        declared[region] = (declared[region] || 0) + decl;
+        (declaredCells[region] = declaredCells[region] || []).push({ row: sheetRow, value: decl, office: office });
+      }
       var parts = splitName(eq);
       var qty = num(row[3]), unit = num(row[4]), total = num(row[5]);
       var rec = {
         id: out.length,
-        sheetRow: r + 1,
+        sheetRow: sheetRow,
         region: region,
         office: office || UNSPECIFIED,
+        noOffice: !office,
         equipment: eq,
         name: parts[0],
         spec: parts[1],
@@ -135,17 +152,280 @@
         qty: qty,
         unit: unit,
         total: total,
+        rawQty: clean(row[3]),
         issues: []
       };
-      if (!unit) rec.issues.push("Unit price is blank");
-      if (!total) rec.issues.push("Total cost is zero");
-      if (unit && qty && Math.abs(qty * unit - total) > 1) {
-        rec.issues.push("Qty × unit price = " + money(qty * unit) + ", but total cost shows " + money(total));
-      }
       rec.hay = (region + " " + rec.office + " " + eq + " " + rec.category).toLowerCase();
       out.push(rec);
     }
-    return { records: out, regions: regions, declared: declared, grand: grand };
+    // Blank rows after the last data row are just sheet padding.
+    var lastRow = Math.max(grandRow, out.length ? out[out.length - 1].sheetRow : 0);
+    emptyRows = emptyRows.filter(function (x) { return x < lastRow; });
+    return {
+      records: out, regions: regions, declared: declared, declaredCells: declaredCells,
+      regionFirstRow: regionFirstRow, grand: grand, grandRow: grandRow, emptyRows: emptyRows, rawCells: rawCells
+    };
+  }
+
+  // ---------- Source sheet audit ----------
+  var ISSUE_TYPES = {
+    "calc": ["critical", "Wrong calculation"],
+    "missing-value": ["critical", "Missing price / quantity"],
+    "grand-total": ["critical", "Grand total mismatch"],
+    "region-total": ["critical", "Region total mismatch"],
+    "duplicate": ["warning", "Possible duplicate row"],
+    "price-conflict": ["warning", "Same item, different price"],
+    "price-outlier": ["warning", "Unusual unit price"],
+    "total-placement": ["warning", "Region total placement"],
+    "missing-office": ["warning", "Missing implementing office"],
+    "incomplete": ["warning", "Incomplete description"],
+    "typo": ["minor", "Spelling error"],
+    "format": ["minor", "Inconsistent formatting"],
+    "whitespace": ["minor", "Extra spaces / line breaks"],
+    "empty-row": ["minor", "Blank row inside data"]
+  };
+  var SEVERITY = { critical: "Critical", warning: "Warning", minor: "Minor" };
+  var SEV_ORDER = { critical: 0, warning: 1, minor: 2 };
+
+  var TYPOS = [
+    [/\bbachhoe\b/i, "Backhoe"], [/\bbacho\b/i, "Backhoe"], [/\bexcavato\b/i, "Excavator"],
+    [/\bamphbious\b/i, "Amphibious"], [/\bpoontons?\b/i, "Pontoon"], [/\bvaccuum\b/i, "Vacuum"],
+    [/\bbulldoxer\b/i, "Bulldozer"], [/\bwate\b/i, "Water"], [/\bcrawle\b/i, "Crawler"],
+    [/\battachmet\b/i, "Attachment"], [/\bmultipurpise\b/i, "Multipurpose"], [/\baccesories\b/i, "Accessories"],
+    [/\bwatermastr\b/i, "Watermaster"], [/\bmitigating flood\b/i, "Mitigating Equipment"]
+  ];
+  var MONEY_FMT = /^₱\d{1,3}(,\d{3})*\.\d{2}$/;
+
+  function median(a) {
+    var s = a.slice().sort(function (x, y) { return x - y; });
+    var m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  function itemKey(eq) {
+    return eq.toLowerCase().replace(/[–—]/g, "-").replace(/\s+/g, " ").replace(/\s*-\s*/g, " - ").trim();
+  }
+
+  function audit(d) {
+    var issues = [];
+    var recs = d.records;
+    function add(type, o) {
+      o.type = type;
+      o.severity = ISSUE_TYPES[type][0];
+      o.label = ISSUE_TYPES[type][1];
+      o.rows = o.rows || [];
+      o.recs = o.recs || [];
+      o.id = issues.length;
+      issues.push(o);
+      o.recs.forEach(function (rec) { rec.issues.push(o); });
+    }
+
+    // 1. Row arithmetic and missing values
+    recs.forEach(function (r) {
+      if (!r.qty || !r.unit || !r.total) {
+        var miss = [];
+        if (!r.qty) miss.push("quantity");
+        if (!r.unit) miss.push("unit price");
+        if (!r.total) miss.push("total cost");
+        add("missing-value", {
+          region: r.region, office: r.office, rows: [r.sheetRow], recs: [r],
+          title: r.equipment,
+          detail: "Blank or zero " + miss.join(", ") + "." + (!r.total ? " This item adds ₱0 to every total." : ""),
+          found: "Qty " + (r.rawQty || "—") + " × " + (r.unit ? money(r.unit) : "—") + " = " + (r.total ? money(r.total) : "—"),
+          impact: null
+        });
+      }
+      if (r.unit && r.qty && Math.abs(r.qty * r.unit - r.total) > 1) {
+        var exp = r.qty * r.unit;
+        add("calc", {
+          region: r.region, office: r.office, rows: [r.sheetRow], recs: [r],
+          title: r.equipment,
+          detail: int.format(r.qty) + " × " + money(r.unit) + " should be " + money(exp) + ".",
+          expected: money(exp), found: money(r.total),
+          impact: r.total - exp
+        });
+      }
+    });
+
+    // 2. Grand total
+    var rowsSum = recs.reduce(function (a, r) { return a + r.total; }, 0);
+    var declSum = Object.keys(d.declared).reduce(function (a, k) { return a + d.declared[k]; }, 0);
+    var qtyFixed = recs.reduce(function (a, r) { return a + (r.qty && r.unit ? r.qty * r.unit : r.total); }, 0);
+    if (d.grand && Math.abs(d.grand - rowsSum) > 1) {
+      add("grand-total", {
+        region: "", office: "", rows: [d.grandRow],
+        title: "TOTAL row does not equal the sum of all line items",
+        detail: "Sum of every Total Cost cell is " + money(rowsSum) + ". Sum of the region “Total Amount Requested” cells is " + money(declSum) +
+          ". If every row used Qty × Unit Price, the total would be " + money(qtyFixed) + ".",
+        expected: money(rowsSum), found: money(d.grand),
+        impact: d.grand - rowsSum
+      });
+    }
+
+    // 3. Region totals and where they were typed
+    d.regions.forEach(function (name) {
+      var inRegion = recs.filter(function (r) { return r.region === name; });
+      var calc = inRegion.reduce(function (a, r) { return a + r.total; }, 0);
+      var cells = d.declaredCells[name] || [];
+      var decl = d.declared[name] || 0;
+      if (!cells.length) {
+        add("total-placement", {
+          region: name, office: "", rows: [d.regionFirstRow[name]],
+          title: name + " has no “Total Amount Requested” value",
+          detail: "Computed total from its rows is " + money(calc) + "."
+        });
+      } else if (Math.abs(calc - decl) > 1) {
+        add("region-total", {
+          region: name, office: "", rows: cells.map(function (c) { return c.row; }),
+          title: name + ": “Total Amount Requested” does not match its line items",
+          detail: "Its " + inRegion.length + " line items add up to " + money(calc) + (cells.length > 1 ? " (sheet value is the sum of " + cells.length + " separate cells)." : "."),
+          expected: money(calc), found: money(decl),
+          impact: decl - calc
+        });
+      }
+      if (cells.length > 1) {
+        add("total-placement", {
+          region: name, office: "", rows: cells.map(function (c) { return c.row; }),
+          title: name + ": total is split across " + cells.length + " cells",
+          detail: cells.map(function (c) { return money(c.value) + " (row " + c.row + (c.office ? ", " + c.office : "") + ")"; }).join(" + ") +
+            ". It is unclear whether these are subtotals or the regional total."
+        });
+      } else if (cells.length === 1 && cells[0].row !== d.regionFirstRow[name]) {
+        add("total-placement", {
+          region: name, office: "", rows: [cells[0].row],
+          title: name + ": total is typed on a middle row",
+          detail: "The value " + money(cells[0].value) + " sits on row " + cells[0].row + (cells[0].office ? " (" + cells[0].office + ")" : "") +
+            " instead of the region's first row (" + d.regionFirstRow[name] + "), so it reads like that office's figure."
+        });
+      }
+    });
+
+    // 4. Duplicate rows (same office, item, qty and price)
+    var seen = {};
+    recs.forEach(function (r) {
+      var k = [r.region, r.office, itemKey(r.equipment), r.qty, r.unit].join("|");
+      (seen[k] = seen[k] || []).push(r);
+    });
+    Object.keys(seen).forEach(function (k) {
+      var g = seen[k];
+      if (g.length < 2) return;
+      var extra = g.slice(1).reduce(function (a, r) { return a + r.total; }, 0);
+      add("duplicate", {
+        region: g[0].region, office: g[0].office, rows: g.map(function (r) { return r.sheetRow; }), recs: g,
+        title: g[0].equipment,
+        detail: "Appears " + g.length + " times in the same office with the same quantity and price. If unintended, " + money(extra) + " is double-counted.",
+        impact: extra
+      });
+    });
+
+    // 5. Identical item text priced differently
+    var byItem = {};
+    recs.forEach(function (r) { if (r.unit) (byItem[itemKey(r.equipment)] = byItem[itemKey(r.equipment)] || []).push(r); });
+    Object.keys(byItem).forEach(function (k) {
+      var g = byItem[k];
+      var prices = {};
+      g.forEach(function (r) { prices[r.unit] = 1; });
+      var list = Object.keys(prices).map(Number).sort(function (a, b) { return a - b; });
+      if (list.length < 2) return;
+      var lo = list[0], hi = list[list.length - 1];
+      if (hi / lo < 1.25) return;
+      add("price-conflict", {
+        region: g.every(function (r) { return r.region === g[0].region; }) ? g[0].region : "", office: g.every(function (r) { return r.office === g[0].office; }) ? g[0].office : "",
+        rows: g.map(function (r) { return r.sheetRow; }), recs: g,
+        title: g[0].equipment,
+        detail: "Same description, " + list.length + " different unit prices: " + list.map(money).join(", ") + " (" + (hi / lo).toFixed(1) + "× spread)." +
+          g.map(function (r) { return " Row " + r.sheetRow + ": " + r.region + " / " + r.office + " @ " + money(r.unit); }).join(";")
+      });
+    });
+
+    // 6. Unit price far from others of the same equipment type
+    var byType = {};
+    recs.forEach(function (r) { if (r.unit) (byType[r.type.toLowerCase()] = byType[r.type.toLowerCase()] || []).push(r); });
+    Object.keys(byType).forEach(function (k) {
+      var g = byType[k];
+      if (g.length < 5) return;
+      var med = median(g.map(function (r) { return r.unit; }));
+      g.forEach(function (r) {
+        var ratio = r.unit / med;
+        if (ratio > 0.2 && ratio < 5) return;
+        add("price-outlier", {
+          region: r.region, office: r.office, rows: [r.sheetRow], recs: [r],
+          title: r.equipment,
+          detail: "Unit price " + money(r.unit) + " is " + (ratio < 1 ? (1 / ratio).toFixed(1) + "× lower" : ratio.toFixed(1) + "× higher") +
+            " than the typical " + r.type + " in this sheet (median " + money(med) + " across " + g.length + " rows)."
+        });
+      });
+    });
+
+    // 7. Missing office, incomplete descriptions, typos
+    recs.forEach(function (r) {
+      if (r.noOffice) {
+        add("missing-office", {
+          region: r.region, office: r.office, rows: [r.sheetRow], recs: [r],
+          title: r.equipment, detail: "Implementing Office is blank, so this cost cannot be attributed to a DEO or regional office."
+        });
+      }
+      var inc = [];
+      if (/not indicated|as indicated in (the )?source|as listed/i.test(r.equipment)) inc.push("specification marked as not indicated / copied from source");
+      if ((r.equipment.match(/\(/g) || []).length !== (r.equipment.match(/\)/g) || []).length) inc.push("unclosed parenthesis — text looks cut off");
+      if (/operating weight: 7 kg/i.test(r.equipment)) inc.push("“7 kg” operating weight is implausible for a backhoe");
+      if (/^[^–—-]*$/.test(r.equipment) && r.equipment.split(" ").length <= 2) inc.push("no capacity or specification given");
+      if (inc.length) {
+        add("incomplete", {
+          region: r.region, office: r.office, rows: [r.sheetRow], recs: [r],
+          title: r.equipment, detail: inc.join("; ") + "."
+        });
+      }
+      var found = [];
+      TYPOS.forEach(function (t) {
+        var m = r.equipment.match(t[0]);
+        if (m) found.push("“" + m[0] + "” → " + t[1]);
+      });
+      if (found.length) {
+        add("typo", {
+          region: r.region, office: r.office, rows: [r.sheetRow], recs: [r],
+          title: r.equipment, detail: found.join(", ")
+        });
+      }
+    });
+
+    // 8. Raw-cell formatting: stray whitespace, inconsistent currency style
+    var fmtByOffice = {};
+    d.rawCells.forEach(function (c) {
+      var bad = [];
+      [["Region", 0], ["Implementing Office", 1], ["Equipment", 2]].forEach(function (f) {
+        var v = c.cells[f[1]] || "";
+        if (v && v !== v.replace(/\s+/g, " ").trim()) {
+          bad.push(f[0] + " " + (/\n/.test(v) ? "contains a line break" : /^\s|\s$/.test(v) ? "has leading/trailing spaces" : "has double spaces or tabs"));
+        }
+      });
+      if (bad.length) {
+        add("whitespace", { region: c.region, office: c.office, rows: [c.row], title: clean(c.cells[2]) || clean(c.cells[1]) || clean(c.cells[0]), detail: bad.join("; ") + "." });
+      }
+      [4, 5, 6].forEach(function (col) {
+        var v = c.cells[col] || "";
+        if (v && !MONEY_FMT.test(v)) {
+          var k = c.region + "|" + c.office;
+          (fmtByOffice[k] = fmtByOffice[k] || { region: c.region, office: c.office, rows: [], sample: v }).rows.push(c.row);
+        }
+      });
+    });
+    Object.keys(fmtByOffice).forEach(function (k) {
+      var g = fmtByOffice[k];
+      var rows = g.rows.filter(function (x, i, a) { return a.indexOf(x) === i; });
+      add("format", {
+        region: g.region, office: g.office, rows: rows,
+        title: (g.office || g.region) + ": peso amounts typed in a different format",
+        detail: rows.length + " row(s) use a format like “" + g.sample + "” instead of “₱1,000,000.00” (extra spaces). They may be stored as text rather than numbers, which breaks SUM formulas."
+      });
+    });
+    d.emptyRows.forEach(function (row) {
+      add("empty-row", { region: "", office: "", rows: [row], title: "Blank row " + row, detail: "An empty row inside the table can break filters, sorting and range-based formulas." });
+    });
+
+    issues.sort(function (a, b) {
+      return SEV_ORDER[a.severity] - SEV_ORDER[b.severity] || Math.abs(b.impact || 0) - Math.abs(a.impact || 0) || (a.rows[0] || 0) - (b.rows[0] || 0);
+    });
+    return { issues: issues, rowsSum: rowsSum, declSum: declSum, qtyFixed: qtyFixed };
   }
 
   // ---------- Loading ----------
@@ -185,6 +465,7 @@
     state.regions = data.regions;
     state.declared = data.declared;
     state.declaredGrand = data.grand;
+    state.audit = audit(data);
     state.source = source;
     state.loadedAt = new Date();
     var when = state.loadedAt.toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" });
@@ -203,6 +484,7 @@
     if (skip !== "region" && state.region && r.region !== state.region) return false;
     if (skip !== "office" && state.office && r.office !== state.office) return false;
     if (skip !== "cat" && state.cat && r.category !== state.cat) return false;
+    if (state.issuesOnly && !r.issues.length) return false;
     if (state.q) {
       var terms = state.q.toLowerCase().split(/\s+/);
       for (var i = 0; i < terms.length; i++) if (terms[i] && r.hay.indexOf(terms[i]) < 0) return false;
@@ -229,6 +511,7 @@
   }
 
   function setFilter(key, val) {
+    if (key === "issuesOnly") { state.issuesOnly = false; $("issuesOnly").checked = false; render(); return; }
     state[key] = state[key] === val ? "" : val;
     if (key === "region") state.office = "";
     if (key === "q") $("q").value = state.q;
@@ -259,7 +542,8 @@
     renderBars(rows);
     renderRegionCards();
     renderTable(rows);
-    renderChecks(rows);
+    renderChecks();
+    renderAlert();
     syncUrl();
   }
 
@@ -270,7 +554,7 @@
     rows.forEach(function (r) { offices[r.region + "|" + r.office] = 1; regions[r.region] = 1; });
     var isFiltered = rows.length !== state.all.length;
     var k = [
-      ["main", "Total amount requested", money(total), isFiltered ? pct(total, allTotal) + " of " + compact(allTotal) + " overall" : "across all regions"],
+      ["main", "Total amount requested", money(total), isFiltered ? pct(total, allTotal) + " of " + compact(allTotal) + " overall" : (state.declaredGrand && Math.abs(state.declaredGrand - total) > 1 ? "sum of all rows · sheet's TOTAL row says " + compact(state.declaredGrand) + " ⚠" : "across all regions")],
       ["", "Equipment units", int.format(sum(rows, "qty")), "pieces requested"],
       ["", "Line items", int.format(rows.length), "distinct requests"],
       ["", "Implementing offices", int.format(Object.keys(offices).length), "DEOs & regional offices"],
@@ -287,6 +571,7 @@
     if (state.region) c.push(["region", "Region", state.region]);
     if (state.office) c.push(["office", "Office", state.office]);
     if (state.cat) c.push(["cat", "Category", state.cat]);
+    if (state.issuesOnly) c.push(["issuesOnly", "Rows", "with issues only"]);
     $("chips").innerHTML = c.map(function (x) {
       return '<span class="chip">' + x[1] + ': <b>' + esc(x[2]) + '</b><button type="button" data-clear="' + x[0] + '" aria-label="Remove ' + x[1] + ' filter"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></span>';
     }).join("");
@@ -337,11 +622,12 @@
       var g = groups[name];
       if (!g) return "";
       var share = total ? g.total / total * 100 : 0;
+      var nIss = state.audit.issues.filter(function (i) { return i.region === name && i.severity !== "minor"; }).length;
       return '<button type="button" class="region-card" data-region="' + esc(name) + '" style="--share:' + share.toFixed(1) + '%">' +
         '<span class="share">' + pct(g.total, total) + "</span>" +
         "<h3>" + esc(name) + "</h3>" +
         '<div class="amt">' + compact(g.total) + "</div>" +
-        '<div class="meta"><span>' + Object.keys(g.offices).length + " offices</span><span>" + int.format(g.qty) + " units</span><span>" + g.items + " items</span></div></button>";
+        '<div class="meta"><span>' + Object.keys(g.offices).length + " offices</span><span>" + int.format(g.qty) + " units</span><span>" + g.items + " items</span>" + (nIss ? '<span class="iss-count">⚠ ' + nIss + " issue" + (nIss > 1 ? "s" : "") + "</span>" : "") + "</div></button>";
     }).join("") || '<p class="muted">No regions match these filters.</p>';
   }
 
@@ -355,16 +641,21 @@
     });
   }
 
+  function worstSev(list) {
+    return list.reduce(function (w, i) { return SEV_ORDER[i.severity] < SEV_ORDER[w] ? i.severity : w; }, "minor");
+  }
   function rowHtml(r) {
-    var flag = r.issues.length ? '<span class="flag" title="' + esc(r.issues.join("; ")) + '">check</span>' : "";
-    return "<tr>" +
+    var sev = r.issues.length ? worstSev(r.issues) : "";
+    var flag = r.issues.length ? '<button type="button" class="flag sev-' + sev + '" data-issue-row="' + r.sheetRow + '" title="' + esc(r.issues.map(function (i) { return i.label + ": " + i.detail; }).join("\n")) + '">' +
+      (r.issues.length > 1 ? r.issues.length + " issues" : esc(r.issues[0].label)) + "</button>" : "";
+    return '<tr' + (sev ? ' class="has-issue sev-' + sev + '"' : "") + ">" +
       '<td class="c-region">' + esc(r.region) + "</td>" +
       '<td class="c-office">' + esc(r.office) + "</td>" +
       '<td class="eq"><strong>' + esc(r.name) + flag + "</strong>" + (r.spec ? "<span>" + esc(r.spec) + "</span>" : "") + "</td>" +
       '<td class="c-cat"><span class="tag">' + esc(r.category) + "</span></td>" +
       '<td class="num c-qty">' + int.format(r.qty) + "</td>" +
       '<td class="num c-unit">' + (r.unit ? money(r.unit) : "—") + "</td>" +
-      '<td class="num c-total">' + money(r.total) + "</td></tr>";
+      '<td class="num c-total">' + money(r.total) + '<a class="row-link" href="' + sheetLink(r.sheetRow) + '" target="_blank" rel="noopener" title="Open row ' + r.sheetRow + ' in Google Sheets">row ' + r.sheetRow + "</a></td></tr>";
   }
 
   function renderTable(rows) {
@@ -398,31 +689,108 @@
     }
   }
 
-  function renderChecks(rows) {
-    var flagged = rows.filter(function (r) { return r.issues.length; });
-    $("issueCount").textContent = flagged.length + (flagged.length === 1 ? " item" : " items");
-    $("issues").innerHTML = flagged.length ? flagged.map(function (r) {
-      return "<li><b>" + esc(r.equipment) + '</b><span class="where">' + esc(r.region) + " · " + esc(r.office) + " · sheet row " + r.sheetRow + "</span>" +
-        r.issues.map(function (i) { return '<div class="what">' + esc(i) + "</div>"; }).join("") + "</li>";
-    }).join("") : '<li style="border-left-color:var(--ok-ink)">No arithmetic issues in the current selection.</li>';
+  function issueMatches(i, skip) {
+    if (skip !== "sev" && state.sev && i.severity !== state.sev) return false;
+    if (skip !== "itype" && state.itype && i.type !== state.itype) return false;
+    if (state.issueScope) {
+      if (state.region && i.region && i.region !== state.region) return false;
+      if (state.office && i.office && i.office !== state.office) return false;
+    }
+    return true;
+  }
+  function signed(n) { return (n > 0 ? "+" : n < 0 ? "−" : "") + money(Math.abs(n)); }
+
+  function issueHtml(i) {
+    var loc = [i.region, i.office && i.office !== UNSPECIFIED ? i.office : ""].filter(Boolean).join(" · ");
+    var rows = i.rows.length ? (i.rows.length === 1 ? "Row " + i.rows[0] : "Rows " + i.rows.join(", ")) : "";
+    var cmp = "";
+    if (i.expected || i.found || i.impact) {
+      cmp = '<div class="cmp">' +
+        (i.expected ? '<span><small>Should be</small><b>' + esc(i.expected) + "</b></span>" : "") +
+        (i.found ? '<span><small>Sheet shows</small><b>' + esc(i.found) + "</b></span>" : "") +
+        (i.impact ? '<span><small>' + (i.type === "duplicate" ? "Possible double count" : "Difference") + '</small><b class="diff">' + signed(i.impact) + "</b></span>" : "") +
+        "</div>";
+    }
+    return '<article class="issue sev-' + i.severity + '">' +
+      '<div class="issue-top"><span class="sev">' + SEVERITY[i.severity] + '</span><span class="itype">' + esc(i.label) + "</span>" +
+      (loc ? '<span class="loc">' + esc(loc) + "</span>" : "") + "</div>" +
+      "<h4>" + esc(i.title) + "</h4><p>" + esc(i.detail) + "</p>" + cmp +
+      (i.rows.length ? '<a class="open-row" target="_blank" rel="noopener" href="' + sheetLink(Math.min.apply(null, i.rows), Math.max.apply(null, i.rows)) + '">' + rows + ' · open in Google Sheets ↗</a>' : "") +
+      "</article>";
+  }
+
+  function renderChecks() {
+    var all = state.audit.issues;
+    var base = all.filter(function (i) { return issueMatches(i, "sev"); });
+    var counts = { critical: 0, warning: 0, minor: 0 };
+    base.forEach(function (i) { counts[i.severity]++; });
+    var calcImpact = all.filter(function (i) { return i.type === "calc"; }).reduce(function (a, i) { return a + i.impact; }, 0);
+    var g = all.filter(function (i) { return i.type === "grand-total"; })[0];
+    var affected = {};
+    all.forEach(function (i) { i.recs.forEach(function (r) { affected[r.id] = 1; }); });
+    var sevCard = function (k, desc) {
+      return '<button type="button" class="isum sev-' + k + (state.sev === k ? " is-on" : "") + '" data-sev="' + k + '"><span class="isum-n">' + counts[k] + '</span><span class="isum-l">' + SEVERITY[k] + "</span><span class=\"isum-d\">" + desc + "</span></button>";
+    };
+    $("issueSummary").innerHTML =
+      sevCard("critical", "wrong math, missing values, totals that don't add up") +
+      sevCard("warning", "duplicates, conflicting prices, unclear entries") +
+      sevCard("minor", "typos, spacing and formatting") +
+      '<div class="isum impact"><span class="isum-n">' + (g ? signed(g.impact) : "₱0") + '</span><span class="isum-l">TOTAL row error</span><span class="isum-d">' +
+      (g ? "Sheet says " + g.found + "; rows add up to " + g.expected : "TOTAL row matches the rows") + "</span></div>" +
+      '<div class="isum impact"><span class="isum-n">' + signed(calcImpact) + '</span><span class="isum-l">Net row calculation error</span><span class="isum-d">' +
+      Object.keys(affected).length + " of " + state.all.length + " line items have at least one issue</span></div>";
+
+    var types = Object.keys(ISSUE_TYPES).filter(function (t) { return all.some(function (i) { return i.type === t; }); });
+    $("fIssueType").innerHTML = '<option value="">All issue types (' + all.filter(function (i) { return issueMatches(i, "itype"); }).length + ")</option>" + types.map(function (t) {
+      var n = all.filter(function (i) { return i.type === t && issueMatches(i, "itype"); }).length;
+      return '<option value="' + t + '"' + (t === state.itype ? " selected" : "") + ">" + esc(ISSUE_TYPES[t][1]) + " (" + n + ")</option>";
+    }).join("");
+    $("issueScopeWrap").hidden = !(state.region || state.office);
+
+    var list = all.filter(function (i) { return issueMatches(i); });
+    $("issues").innerHTML = list.length
+      ? list.slice(0, state.issueLimit).map(issueHtml).join("")
+      : '<p class="empty">No issues of this kind' + (state.region ? " in " + esc(state.region) : "") + ".</p>";
+    $("moreIssues").hidden = list.length <= state.issueLimit;
+    $("moreIssues").textContent = "Show all " + list.length + " issues";
+    $("issueNav").textContent = all.filter(function (i) { return i.severity === "critical"; }).length || "";
 
     var byRegion = {};
-    groupSum(state.all, "region").forEach(function (g) { byRegion[g.key] = g.total; });
-    var html = state.regions.map(function (name) {
+    groupSum(state.all, "region").forEach(function (x) { byRegion[x.key] = x.total; });
+    var html = '<div class="recon-row head"><span>Region</span><span class="num">Rows add up to</span><span class="num">Sheet says</span><span class="num">Difference</span></div>';
+    html += state.regions.map(function (name) {
       var calc = byRegion[name] || 0, decl = state.declared[name] || 0;
-      var diff = calc - decl;
-      var badge = !decl ? '<span class="muted small">no total entered</span>'
-        : Math.abs(diff) < 1 ? '<span class="ok">✓ matches</span>'
-        : '<span class="diff">' + (diff > 0 ? "+" : "−") + compact(Math.abs(diff)) + "</span>";
-      return '<div class="recon-row"><span>' + esc(name) + '</span><span class="num">' + money(calc) + (decl ? "<small>sheet: " + money(decl) + "</small>" : "") + "</span>" + badge + "</div>";
+      var diff = decl - calc;
+      var badge = !decl ? '<span class="muted small">not entered</span>'
+        : Math.abs(diff) < 1 ? '<span class="ok">✓</span>'
+        : '<span class="diff">' + signed(diff) + "</span>";
+      return '<div class="recon-row' + (decl && Math.abs(diff) >= 1 ? " bad" : "") + '"><span>' + esc(name) + '</span><span class="num">' + money(calc) + '</span><span class="num">' + (decl ? money(decl) : "—") + '</span><span class="num">' + badge + "</span></div>";
     }).join("");
-    var all = sum(state.all, "total");
+    var a = state.audit;
     if (state.declaredGrand) {
-      var gd = all - state.declaredGrand;
-      html += '<div class="recon-row"><strong>Grand total</strong><span class="num"><strong>' + money(all) + "</strong><small>sheet: " + money(state.declaredGrand) + "</small></span>" +
-        (Math.abs(gd) < 1 ? '<span class="ok">✓ matches</span>' : '<span class="diff">' + (gd > 0 ? "+" : "−") + compact(Math.abs(gd)) + "</span>") + "</div>";
+      var gd = state.declaredGrand - a.rowsSum;
+      html += '<div class="recon-row total' + (Math.abs(gd) >= 1 ? " bad" : "") + '"><strong>TOTAL row</strong><span class="num"><strong>' + money(a.rowsSum) + '</strong></span><span class="num"><strong>' + money(state.declaredGrand) + '</strong></span><span class="num">' +
+        (Math.abs(gd) < 1 ? '<span class="ok">✓</span>' : '<span class="diff">' + signed(gd) + "</span>") + "</span></div>";
     }
     $("recon").innerHTML = html;
+    $("reconNote").innerHTML = "Sum of all region “Total Amount Requested” cells: <b>" + money(a.declSum) + "</b>. If every row used Qty × Unit Price, the grand total would be <b>" + money(a.qtyFixed) + "</b>.";
+  }
+
+  function renderAlert() {
+    var iss = state.audit.issues;
+    var crit = iss.filter(function (i) { return i.severity === "critical"; }).length;
+    var g = iss.filter(function (i) { return i.type === "grand-total"; })[0];
+    $("alert").hidden = !iss.length;
+    $("alert").innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2zM12 10v5M12 18v.5"/></svg><span><b>' + iss.length + " issues found in the source sheet</b> — " + crit + " critical" +
+      (g ? ", including a TOTAL row that is off by " + compact(Math.abs(g.impact)) : "") + '.</span><span class="alert-cta">Review issues →</span>';
+  }
+
+  function exportIssues() {
+    var head = ["Severity", "Issue", "Region", "Implementing Office", "Sheet rows", "Item", "Details", "Should be", "Sheet shows", "Difference"];
+    var list = state.audit.issues.filter(function (i) { return issueMatches(i); });
+    download("okb-source-issues.csv", [head].concat(list.map(function (i) {
+      return [SEVERITY[i.severity], i.label, i.region, i.office, i.rows.join(" "), i.title, i.detail, i.expected || "", i.found || "", i.impact || ""];
+    })));
   }
 
   // ---------- Region drawer ----------
@@ -438,6 +806,10 @@
       "<div><span>Units</span><strong>" + int.format(sum(rows, "qty")) + "</strong></div>" +
       "<div><span>Offices</span><strong>" + offices.length + "</strong></div></div>" +
       '<div class="drawer-actions"><button class="btn" type="button" data-apply-region="' + esc(name) + '">Filter page to ' + esc(name) + "</button></div>" +
+      (function () {
+        var ri = state.audit.issues.filter(function (i) { return i.region === name && i.severity !== "minor"; });
+        return ri.length ? '<details class="office drawer-issues"><summary><span class="s-left">⚠ Source issues<small>' + ri.length + " critical / warning</small></span></summary><div class=\"issue-mini\">" + ri.map(issueHtml).join("") + "</div></details>" : "";
+      })() +
       offices.map(function (of, i) {
         var items = rows.filter(function (r) { return r.office === of.key; }).sort(function (a, b) { return b.total - a.total; });
         return '<details class="office"' + (i < 2 ? " open" : "") + '><summary><span class="s-left">' + esc(of.key) + "<small>" + of.items + " items</small></span><span>" + compact(of.total) + "</span></summary><ul>" +
@@ -459,21 +831,25 @@
   }
 
   // ---------- Export ----------
-  function exportCsv() {
-    var rows = sorted(filtered());
-    var head = ["Region", "Implementing Office", "Equipment", "Category", "Qty", "Unit Price", "Total Cost"];
-    var lines = [head].concat(rows.map(function (r) {
-      return [r.region, r.office, r.equipment, r.category, r.qty, r.unit, r.total];
-    })).map(function (a) {
+  function download(name, rows) {
+    var lines = rows.map(function (a) {
       return a.map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(",");
     });
-    var blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-    var a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "okb-equipment" + (state.region ? "-" + state.region.replace(/\W+/g, "-") : "") + ".csv";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    var blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    var link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(function () { URL.revokeObjectURL(link.href); link.remove(); }, 0);
+  }
+
+  function exportCsv() {
+    var rows = sorted(filtered());
+    var head = ["Region", "Implementing Office", "Equipment", "Category", "Qty", "Unit Price", "Total Cost", "Sheet Row", "Issues"];
+    download("okb-equipment" + (state.region ? "-" + state.region.replace(/\W+/g, "-") : "") + ".csv", [head].concat(rows.map(function (r) {
+      return [r.region, r.office, r.equipment, r.category, r.qty, r.unit, r.total, r.sheetRow, r.issues.map(function (i) { return i.label; }).join("; ")];
+    })));
   }
 
   // ---------- URL state ----------
@@ -481,6 +857,9 @@
     var p = new URLSearchParams();
     ["q", "region", "office", "cat"].forEach(function (k) { if (state[k]) p.set(k, state[k]); });
     if (state.view !== "grouped") p.set("view", state.view);
+    if (state.issuesOnly) p.set("issues", "1");
+    if (state.sev) p.set("sev", state.sev);
+    if (state.itype) p.set("itype", state.itype);
     var qs = p.toString();
     try { history.replaceState(null, "", location.pathname + (qs ? "?" + qs : "") + location.hash); } catch (e) { /* ignore */ }
   }
@@ -488,6 +867,10 @@
     var p = new URLSearchParams(location.search);
     ["q", "region", "office", "cat"].forEach(function (k) { state[k] = p.get(k) || ""; });
     if (p.get("view") === "flat") state.view = "flat";
+    state.issuesOnly = p.get("issues") === "1";
+    $("issuesOnly").checked = state.issuesOnly;
+    state.sev = p.get("sev") || "";
+    state.itype = p.get("itype") || "";
     $("q").value = state.q;
     setView(state.view);
   }
@@ -523,21 +906,39 @@
     $("fCat").addEventListener("change", function (e) { state.cat = e.target.value; render(); });
     $("clearBtn").addEventListener("click", function () {
       state.q = state.region = state.office = state.cat = "";
+      state.issuesOnly = false;
+      $("issuesOnly").checked = false;
       $("q").value = "";
       buildSelects();
       render();
     });
     $("refreshBtn").addEventListener("click", load);
     $("exportBtn").addEventListener("click", exportCsv);
+    $("exportIssuesBtn").addEventListener("click", exportIssues);
+    $("issuesOnly").addEventListener("change", function (e) { state.issuesOnly = e.target.checked; render(); });
+    $("fIssueType").addEventListener("change", function (e) { state.itype = e.target.value; state.issueLimit = 25; render(); });
+    $("issueScope").addEventListener("change", function (e) { state.issueScope = e.target.checked; render(); });
+    $("moreIssues").addEventListener("click", function () { state.issueLimit = 1e9; render(); });
+    $("alert").addEventListener("click", function () { document.getElementById("checks").scrollIntoView(); });
     $("printBtn").addEventListener("click", function () { window.print(); });
     $("drawerClose").addEventListener("click", closeDrawer);
     $("drawerBackdrop").addEventListener("click", closeDrawer);
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && $("drawer").classList.contains("open")) closeDrawer(); });
 
     document.addEventListener("click", function (e) {
-      var el = e.target.closest("[data-k],[data-clear],[data-region],[data-apply-region],[data-view],th[data-sort]");
+      var el = e.target.closest("[data-k],[data-clear],[data-region],[data-apply-region],[data-view],[data-sev],[data-issue-row],th[data-sort]");
       if (!el) return;
-      if (el.hasAttribute("data-k")) setFilter(el.getAttribute("data-k"), el.getAttribute("data-v"));
+      if (el.hasAttribute("data-sev")) { state.sev = state.sev === el.getAttribute("data-sev") ? "" : el.getAttribute("data-sev"); state.issueLimit = 25; render(); }
+      else if (el.hasAttribute("data-issue-row")) {
+        var row = +el.getAttribute("data-issue-row");
+        state.sev = ""; state.itype = ""; state.issueLimit = 1e9;
+        render();
+        var hit = state.audit.issues.filter(function (i) { return i.rows.indexOf(row) >= 0; })[0];
+        var cards = document.querySelectorAll("#issues .issue");
+        var idx = state.audit.issues.filter(function (i) { return issueMatches(i); }).indexOf(hit);
+        if (cards[idx]) { cards[idx].scrollIntoView({ block: "center" }); cards[idx].classList.add("pulse"); setTimeout(function () { cards[idx].classList.remove("pulse"); }, 1600); }
+      }
+      else if (el.hasAttribute("data-k")) setFilter(el.getAttribute("data-k"), el.getAttribute("data-v"));
       else if (el.hasAttribute("data-clear")) setFilter(el.getAttribute("data-clear"), state[el.getAttribute("data-clear")]);
       else if (el.hasAttribute("data-region")) openRegion(el.getAttribute("data-region"));
       else if (el.hasAttribute("data-apply-region")) {
@@ -564,5 +965,5 @@
   load();
 
   // Exposed for tests.
-  window.OKB = { parseCSV: parseCSV, normalize: normalize, categorize: categorize };
+  window.OKB = { parseCSV: parseCSV, normalize: normalize, audit: audit, categorize: categorize, state: state };
 })();

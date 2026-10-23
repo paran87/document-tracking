@@ -22,9 +22,9 @@
       </a>
       <nav class="topnav" aria-label="Sections">
         <a href="#overview">Overview</a>
+        <a href="#checks">Issues <span class="nav-badge" id="issueNav"></span></a>
         <a href="#regions">Regions</a>
         <a href="#records">Records</a>
-        <a href="#checks">Data checks</a>
       </nav>
       <div class="top-actions">
         <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
@@ -48,6 +48,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>Open spreadsheet
         </a>
       </div>
+      <button type="button" class="alert" id="alert" hidden></button>
       <div class="kpis" id="kpis" aria-live="polite"></div>
     </div>
     <svg class="hero-wave" viewBox="0 0 1440 80" preserveAspectRatio="none" aria-hidden="true"><path d="M0 40c120 26 240 26 360 0s240-26 360 0 240 26 360 0 240-26 360 0v40H0z"/></svg>
@@ -95,6 +96,36 @@
       </div>
     </section>
 
+    <section id="checks" class="section">
+      <div class="section-head row">
+        <div>
+          <h2>Source data issues</h2>
+          <p class="muted">Errors and inconsistencies found in the Google Sheet itself — re-checked every time the data loads. Totals elsewhere on this page use each row's <em>Total Cost</em> exactly as entered.</p>
+        </div>
+        <div class="toolbar">
+          <button class="btn" id="exportIssuesBtn" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Export issues
+          </button>
+        </div>
+      </div>
+      <div class="issue-summary" id="issueSummary"></div>
+      <div class="grid-issues">
+        <div>
+          <div class="issue-filters">
+            <label class="field"><span class="sr">Issue type</span><select id="fIssueType" aria-label="Issue type"></select></label>
+            <label class="check" id="issueScopeWrap" hidden><input type="checkbox" id="issueScope" checked> Only for the selected region / office</label>
+          </div>
+          <div class="issue-list" id="issues"></div>
+          <button class="btn more" id="moreIssues" type="button" hidden></button>
+        </div>
+        <article class="card recon-card">
+          <header class="card-head"><h3>Totals check</h3><span class="muted small">rows vs. “Total Amount Requested”</span></header>
+          <div class="recon" id="recon"></div>
+          <p class="muted small recon-note" id="reconNote"></p>
+        </article>
+      </div>
+    </section>
+
     <section id="regions" class="section">
       <div class="section-head">
         <h2>Regions</h2>
@@ -110,6 +141,7 @@
           <p class="muted" id="recordsNote"></p>
         </div>
         <div class="toolbar">
+          <label class="check boxed"><input type="checkbox" id="issuesOnly"> Rows with issues only</label>
           <div class="seg" role="group" aria-label="View">
             <button type="button" class="seg-btn is-on" data-view="grouped">By office</button>
             <button type="button" class="seg-btn" data-view="flat">Flat list</button>
@@ -142,22 +174,6 @@
       </div>
     </section>
 
-    <section id="checks" class="section">
-      <div class="section-head">
-        <h2>Data checks</h2>
-        <p class="muted">Rows worth a second look in the source sheet. Totals on this page use each row's <em>Total Cost</em> as entered.</p>
-      </div>
-      <div class="grid-2">
-        <article class="card">
-          <header class="card-head"><h3>Line items to verify</h3><span class="pill" id="issueCount"></span></header>
-          <ul class="issues" id="issues"></ul>
-        </article>
-        <article class="card">
-          <header class="card-head"><h3>Region totals reconciliation</h3><span class="muted small">sum of rows vs. “Total Amount Requested”</span></header>
-          <div class="recon" id="recon"></div>
-        </article>
-      </div>
-    </section>
   </main>
 
   <footer class="footer">
