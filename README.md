@@ -15,6 +15,18 @@ A static website that presents the **REQ. FUND (EQUIPMENT)** sheet of
 
 Filters are kept in the URL, so a filtered view can be shared as a link.
 
+- **Resolve issues** — one button applies fixes directly in Google Sheets: wrong Total Cost cells become `=E*D` formulas, each region's total becomes a single `=SUM(F…)` on its first row, the TOTAL row becomes `=SUM(F…)`, peso amounts typed as text become real numbers, extra spaces and known misspellings are cleaned. Suggested equipment corrections are offered unticked for review; issues that need a person (missing prices, duplicates, conflicting prices) are listed but never changed. Each cell is only changed if it still holds the value the page showed.
+- **Fix history** — every change is logged in a *Fix History* tab (who, when, cell, before → after) and listed on the page, with **Undo** per batch.
+
+## Enabling "Resolve issues" (one-time)
+
+1. Open the spreadsheet → **Extensions → Apps Script**.
+2. Paste the contents of [`apps-script/Code.gs`](apps-script/Code.gs) into `Code.gs` and change `PASSCODE` to a team secret.
+3. **Deploy → New deployment → Web app**, *Execute as: Me*, *Who has access: Anyone* → Deploy → allow access.
+4. Copy the Web app URL (ends in `/exec`) and either paste it in the page's Resolve issues dialog (saved per browser) or set it in `assets/config.js` so every visitor has it.
+
+Writes require the passcode; the history list is readable without it.
+
 ## Data
 
 The page loads the sheet live (CSV export) every time it opens or when **Refresh** is pressed.

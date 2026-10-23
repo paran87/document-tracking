@@ -6,6 +6,7 @@
   var LIVE_URL = "https://docs.google.com/spreadsheets/d/" + SHEET_ID + "/export?format=csv&gid=" + GID;
   var SNAPSHOT_URL = "data/equipment.csv";
   var UNSPECIFIED = "Region-wide (no office listed)";
+  var DATA_SHEET_NAME = "REQ. FUND (EQUIPMENT)";
 
   // Order matters: first match wins.
   var CATEGORIES = [
@@ -674,7 +675,10 @@
   }
 
   function ingest(text, source) {
-    var data = normalize(parseCSV(text));
+    var rawRows = parseCSV(text);
+    var data = normalize(rawRows);
+    state.rawRows = rawRows;
+    state.data = data;
     if (!data.records.length) throw new Error("no rows");
     state.all = data.records;
     state.regions = data.regions;
@@ -793,6 +797,7 @@
     renderTable(rows);
     renderChecks();
     renderAlert();
+    renderFixCta();
     syncUrl();
   }
 
@@ -1043,7 +1048,7 @@
     $("alert").hidden = !iss.length;
     $("alert").innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2zM12 10v5M12 18v.5"/></svg><span><b>' + iss.length + " issues found in the source sheet</b> — " + crit + " critical" +
       (g ? ", including a TOTAL row that is off by " + compact(Math.abs(g.impact)) : "") +
-      (function () { var n = iss.filter(function (i) { return REALITY_TYPES.indexOf(i.type) >= 0; }).length; return n ? ", and " + n + " equipment entries that can't exist as written" : ""; })() + '.</span><span class="alert-cta">Review issues →</span>';
+      (function () { var n = iss.filter(function (i) { return REALITY_TYPES.indexOf(i.type) >= 0; }).length; return n ? ", and " + n + " equipment entries that can't exist as written" : ""; })() + '.</span><span class="alert-cta">Review &amp; fix →</span>';
   }
 
   function exportIssues() {
@@ -1111,6 +1116,365 @@
     download("okb-equipment" + (state.region ? "-" + state.region.replace(/\W+/g, "-") : "") + ".csv", [head].concat(rows.map(function (r) {
       return [r.region, r.office, r.equipment, r.category, r.qty, r.unit, r.total, r.sheetRow, r.issues.map(function (i) { return i.label; }).join("; "), r.suggestion || ""];
     })));
+  }
+
+  // ---------- Resolve issues in Google Sheets ----------
+  // Fixes are written by the Apps Script in apps-script/Code.gs, which checks
+  // each cell still holds the value shown here before changing it and logs
+  // every change to a "Fix History" tab so a batch can be undone.
+  var fixState = { list: [], sel: {}, busy: false, history: null, historyError: "" };
+
+  function store(k, v) {
+    try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* ignore */ }
+    return null;
+  }
+  function endpoint() {
+    return (window.OKB_CONFIG && window.OKB_CONFIG.fixEndpoint) || store("okb-endpoint") || "";
+  }
+  function sheetMoney(n) {
+    return "₱" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function rawCell(row, col) { return ((state.rawRows || [])[row - 1] || [])[col - 1] || ""; }
+  function a1(row, col) { return "ABCDEFG"[col - 1] + row; }
+  function fixTypos(t) { TYPOS.forEach(function (x) { t = t.replace(x[0], x[1]); }); return t; }
+
+  function buildFixes() {
+    var d = state.data, iss = state.audit.issues, list = [];
+    if (!d) return list;
+    function add(f) { f.id = list.length; list.push(f); return f; }
+    var calcRows = {};
+    iss.filter(function (i) { return i.type === "calc"; }).forEach(function (i) {
+      var r = i.recs[0];
+      calcRows[r.sheetRow] = 1;
+      add({ group: "safe", issue: "Wrong calculation", row: r.sheetRow, col: 6, before: rawCell(r.sheetRow, 6),
+        preview: sheetMoney(r.qty * r.unit), kind: "formula", value: "=E" + r.sheetRow + "*D" + r.sheetRow,
+        desc: "Total Cost becomes the formula =E" + r.sheetRow + "*D" + r.sheetRow + " (Qty × Unit Price)" });
+    });
+    var fixedTotal = function (r) { return calcRows[r.sheetRow] ? r.qty * r.unit : r.total; };
+
+    var regionIssue = {};
+    iss.forEach(function (i) { if ((i.type === "region-total" || i.type === "total-placement") && i.region) regionIssue[i.region] = 1; });
+    d.regions.forEach(function (name) {
+      if (!regionIssue[name]) return;
+      var rs = state.all.filter(function (r) { return r.region === name; });
+      if (!rs.length) return;
+      var first = d.regionFirstRow[name], last = rs[rs.length - 1].sheetRow;
+      var t = rs.reduce(function (a, r) { return a + fixedTotal(r); }, 0);
+      add({ group: "safe", issue: "Region total", row: first, col: 7, before: rawCell(first, 7), preview: sheetMoney(t),
+        kind: "formula", value: "=SUM(F" + first + ":F" + last + ")",
+        desc: name + " total becomes =SUM(F" + first + ":F" + last + ") on the region's first row" });
+      (d.declaredCells[name] || []).forEach(function (c) {
+        if (c.row === first) return;
+        add({ group: "safe", issue: "Region total", row: c.row, col: 7, before: rawCell(c.row, 7), preview: "", kind: "clear", value: "",
+          desc: "Remove the extra " + name + " total (now combined on row " + first + ")" });
+      });
+    });
+
+    if (iss.some(function (i) { return i.type === "grand-total"; }) && d.grandRow && state.all.length) {
+      var f0 = state.all[0].sheetRow, fN = state.all[state.all.length - 1].sheetRow;
+      add({ group: "safe", issue: "Grand total", row: d.grandRow, col: 7, before: rawCell(d.grandRow, 7),
+        preview: sheetMoney(state.all.reduce(function (a, r) { return a + fixedTotal(r); }, 0)), kind: "formula",
+        value: "=SUM(F" + f0 + ":F" + fN + ")", desc: "TOTAL becomes =SUM(F" + f0 + ":F" + fN + "), the sum of every line item" });
+    }
+
+    var suggestion = {};
+    iss.forEach(function (i) { if (REALITY_TYPES.indexOf(i.type) >= 0) suggestion[i.rows[0]] = i; });
+    d.rawCells.forEach(function (c) {
+      [1, 2, 3].forEach(function (col) {
+        var v = c.cells[col - 1] || "";
+        if (!v) return;
+        var cleaned = v.replace(/\s+/g, " ").trim();
+        var after = col === 3 ? fixTypos(cleaned) : cleaned;
+        if (after === v) return;
+        var what = [];
+        if (cleaned !== v) what.push("remove extra spaces / line breaks");
+        if (after !== cleaned) what.push("fix spelling");
+        add({ group: "safe", issue: after !== cleaned ? "Spelling" : "Extra spaces", row: c.row, col: col, before: v, preview: after,
+          kind: "text", value: after, desc: what.join(" and ") });
+      });
+    });
+    Object.keys(suggestion).forEach(function (row) {
+      var i = suggestion[row];
+      add({ group: "suggested", issue: i.label, row: +row, col: 3, before: rawCell(+row, 3), preview: i.suggestion,
+        kind: "text", value: i.suggestion, desc: i.detail + (i.suggestionNote ? " " + i.suggestionNote : "") });
+    });
+
+    // Last, so the cell-by-cell checks above still see the original text.
+    var fmt = iss.filter(function (i) { return i.type === "format"; });
+    if (fmt.length || list.some(function (f) { return f.col === 7; })) {
+      var lastRow = d.grandRow || (state.all.length ? state.all[state.all.length - 1].sheetRow : 4);
+      var firstRow = state.all.length ? state.all[0].sheetRow : 4;
+      add({ group: "safe", issue: "Peso amounts stored as text", kind: "normalizeCurrency", range: "E" + firstRow + ":G" + lastRow,
+        before: "Text such as “ ₱ 7,700,000.00 ”", preview: "Real numbers formatted ₱#,##0.00",
+        desc: "Convert every peso amount typed as text in E" + firstRow + ":G" + lastRow + " to a number, so SUM formulas count it" +
+          (fmt.length ? " (" + fmt.reduce(function (a, i) { return a + i.rows.length; }, 0) + " rows flagged)" : "") });
+    }
+    return list;
+  }
+
+  function manualIssues() {
+    var auto = { calc: 1, "region-total": 1, "total-placement": 1, "grand-total": 1, whitespace: 1, typo: 1, format: 1 };
+    return state.audit.issues.filter(function (i) {
+      return !auto[i.type] && REALITY_TYPES.indexOf(i.type) < 0;
+    });
+  }
+
+  function renderFixCta() {
+    var list = buildFixes();
+    var safe = list.filter(function (f) { return f.group === "safe"; }).length;
+    var sugg = list.filter(function (f) { return f.group === "suggested"; }).length;
+    var manual = manualIssues().length;
+    $("fixCtaTitle").textContent = safe ? safe + " fixes can be applied to the sheet automatically" : "No automatic fixes pending";
+    $("fixCtaText").textContent = "Wrong totals, text-formatted amounts, spacing and spelling are fixed with one click. " +
+      sugg + " suggested equipment corrections are offered for review, and " + manual + " issues need a person (missing prices, possible duplicates, conflicting prices).";
+    var url = endpoint();
+    $("connState").innerHTML = url ? '<span class="ok">● Connected to Google Sheets</span>' : '<span class="muted">Not connected yet</span>';
+    if (url && !fixState.history && !fixState.loadingHistory) loadHistory();
+    if (!url) renderHistory();
+  }
+
+  // ----- Dialog -----
+  function openFix() {
+    fixState.list = buildFixes();
+    fixState.sel = {};
+    fixState.list.forEach(function (f) { if (f.group === "safe") fixState.sel[f.id] = true; });
+    fixState.result = null;
+    renderFix();
+    var dlg = $("fixDialog");
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", "");
+  }
+
+  function renderFix() {
+    var url = endpoint();
+    if (!url || fixState.editUrl) return renderConnect();
+    if (fixState.result) return renderFixResult();
+    var list = fixState.list;
+    var groups = [
+      ["safe", "Automatic fixes", "Safe, mechanical corrections. Each cell is only changed if it still holds the value shown here."],
+      ["suggested", "Suggested equipment corrections", "Estimates based on typical manufacturer specifications. Tick only the ones the requesting office has confirmed."]
+    ];
+    var html = '<p class="muted">Changes are written to <b>' + esc(DATA_SHEET_NAME) + "</b> and logged in a <b>Fix History</b> tab, so any batch can be undone from this page.</p>";
+    groups.forEach(function (g) {
+      var items = list.filter(function (f) { return f.group === g[0]; });
+      if (!items.length) return;
+      var byIssue = {};
+      items.forEach(function (f) { (byIssue[f.issue] = byIssue[f.issue] || []).push(f); });
+      var nOn = items.filter(function (f) { return fixState.sel[f.id]; }).length;
+      html += '<section class="fix-group"><div class="fix-group-head"><label class="check"><input type="checkbox" data-fix-all="' + g[0] + '"' + (nOn === items.length ? " checked" : "") +
+        '> <b>' + g[1] + "</b> <span class=\"muted\">" + nOn + " of " + items.length + " selected</span></label><p class=\"muted small\">" + g[2] + "</p></div>";
+      Object.keys(byIssue).forEach(function (k) {
+        var fx = byIssue[k];
+        var on = fx.filter(function (f) { return fixState.sel[f.id]; }).length;
+        html += '<div class="fix-cat"><label class="check fc-head"><input type="checkbox" data-fix-cat="' + esc(g[0] + "|" + k) + '"' + (on === fx.length ? " checked" : "") +
+          '><span class="fc-name">' + esc(k) + '</span><span class="muted small">' + on + " of " + fx.length + " selected</span></label>" +
+          "<details" + (g[0] === "suggested" || fx.length < 6 ? " open" : "") + "><summary>" + (fx.length === 1 ? "Show change" : "Show " + fx.length + " changes") + "</summary><ul>" +
+          fx.map(function (f) {
+            var where = f.range ? f.range : a1(f.row, f.col);
+            return '<li><label class="fix-item"><input type="checkbox" data-fix="' + f.id + '"' + (fixState.sel[f.id] ? " checked" : "") + '>' +
+              '<span class="fi-cell">' + esc(where) + '</span><span class="fi-main"><span class="fi-desc">' + esc(f.desc) + '</span>' +
+              '<span class="fi-diff"><s>' + esc(f.before === "" ? "(empty)" : f.before) + "</s> → <b>" + esc(f.preview === "" ? "(empty)" : f.preview) + "</b></span></span></label></li>";
+          }).join("") + "</ul></details></div>";
+      });
+      html += "</section>";
+    });
+    var manual = manualIssues();
+    if (manual.length) {
+      html += '<section class="fix-group"><div class="fix-group-head"><b>Needs a person (' + manual.length + ")</b><p class=\"muted small\">These can't be fixed safely without knowing the right answer: missing prices, possible duplicates, conflicting prices, missing offices, incomplete descriptions.</p></div>" +
+        '<div class="fix-cat"><details><summary>Show list</summary><ul>' + manual.map(function (i) {
+          return '<li class="fix-manual"><span class="fi-cell">' + (i.rows.length ? "Row " + i.rows[0] : "") + '</span><span class="fi-main"><span class="fi-desc"><b>' + esc(i.label) + "</b> · " + esc(i.title) + '</span><span class="fi-diff muted">' + esc(i.detail) + "</span></span>" +
+            (i.rows.length ? '<a class="open-row" target="_blank" rel="noopener" href="' + sheetLink(Math.min.apply(null, i.rows), Math.max.apply(null, i.rows)) + '">Open ↗</a>' : "") + "</li>";
+        }).join("") + "</ul></details></div></section>";
+    }
+    $("fixBody").innerHTML = html;
+    var n = selectedFixes().length;
+    $("fixFoot").innerHTML =
+      '<div class="who"><label class="field"><span class="sr">Your name</span><input id="fixBy" placeholder="Your name (shown in history)" value="' + esc(store("okb-by") || "") + '" autocomplete="name"></label>' +
+      '<label class="field"><span class="sr">Passcode</span><input id="fixPass" type="password" placeholder="Passcode" value="' + esc(store("okb-pass") || "") + '" autocomplete="current-password"></label>' +
+      '<label class="check"><input type="checkbox" id="fixRemember"' + (store("okb-pass") ? " checked" : "") + "> Remember on this device</label></div>" +
+      '<div class="foot-actions"><button type="button" class="btn btn-quiet" data-edit-url>Connection settings</button>' +
+      '<button type="button" class="btn btn-primary" id="applyFix"' + (n && !fixState.busy ? "" : " disabled") + ">" + (fixState.busy ? "Applying…" : "Apply " + n + " fix" + (n === 1 ? "" : "es") + " to Google Sheets") + "</button></div>" +
+      (fixState.error ? '<p class="fix-error">' + esc(fixState.error) + "</p>" : "");
+  }
+
+  function selectedFixes() {
+    var chosen = fixState.list.filter(function (f) { return fixState.sel[f.id]; });
+    // A suggested equipment correction replaces any spacing/spelling fix on the same cell.
+    var sugg = {};
+    chosen.forEach(function (f) { if (f.group === "suggested") sugg[f.row + ":" + f.col] = 1; });
+    return chosen.filter(function (f) { return f.group === "suggested" || !sugg[f.row + ":" + f.col]; });
+  }
+
+  function renderConnect() {
+    var url = endpoint();
+    var fromConfig = window.OKB_CONFIG && window.OKB_CONFIG.fixEndpoint;
+    $("fixBody").innerHTML =
+      '<h3 class="connect-title">Connect this page to the Google Sheet</h3>' +
+      '<p class="muted">A small Google Apps Script attached to the spreadsheet applies the fixes, so the page never needs your Google password. It only takes about two minutes, once.</p>' +
+      '<ol class="steps">' +
+      '<li>Open the spreadsheet, then go to <b>Extensions → Apps Script</b>.</li>' +
+      '<li>Replace everything in <code>Code.gs</code> with <a href="https://github.com/paran87/document-tracking/blob/main/apps-script/Code.gs" target="_blank" rel="noopener">this script</a> (click “Copy raw file”), and change <code>PASSCODE</code> at the top to a secret only your team knows.</li>' +
+      '<li>Click <b>Deploy → New deployment</b>, choose <b>Web app</b>, set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then <b>Deploy</b> and allow access.</li>' +
+      '<li>Copy the <b>Web app URL</b> (ends in <code>/exec</code>) and paste it below.</li></ol>' +
+      '<label class="field url-field"><span class="sr">Web app URL</span><input id="fixUrl" placeholder="https://script.google.com/macros/s/…/exec" value="' + esc(url) + '"' + (fromConfig ? " disabled" : "") + "></label>" +
+      (fromConfig ? '<p class="muted small">This URL is set for everyone in <code>assets/config.js</code>.</p>' : '<p class="muted small">Saved in this browser only. To set it for everyone, put it in <code>assets/config.js</code>.</p>');
+    $("fixFoot").innerHTML = '<div class="foot-actions">' + (url ? '<button type="button" class="btn btn-quiet" data-back-fix>Back</button>' : "") +
+      (fromConfig ? "" : '<button type="button" class="btn btn-primary" id="saveUrl">Save &amp; continue</button>') + "</div>" +
+      (fixState.error ? '<p class="fix-error">' + esc(fixState.error) + "</p>" : "");
+  }
+
+  function renderFixResult() {
+    var r = fixState.result;
+    var skipped = (r.results || []).filter(function (x) { return x.status !== "applied"; });
+    var byId = {};
+    fixState.list.forEach(function (f) { byId[f.id] = f; });
+    $("fixBody").innerHTML = '<div class="fix-done"><div class="big-ok">✓</div><h3>' + r.applied + " cell" + (r.applied === 1 ? "" : "s") + " updated in Google Sheets</h3>" +
+      '<p class="muted">Logged as batch <code>' + esc(r.batch) + "</code> in the Fix History tab. The page is reloading the sheet to re-check the issues.</p>" +
+      (skipped.length ? '<h4>Not changed (' + skipped.length + ")</h4><ul class=\"skipped\">" + skipped.map(function (x) {
+        var f = byId[x.id] || {};
+        return "<li><b>" + esc(f.range || a1(f.row, f.col)) + "</b> " + esc(f.issue || "") + " — " + esc(x.status) + "</li>";
+      }).join("") + "</ul>" : "") + "</div>";
+    $("fixFoot").innerHTML = '<div class="foot-actions"><button type="button" data-close-fix class="btn btn-primary">Done</button></div>';
+  }
+
+  function post(payload) {
+    return fetch(endpoint(), { method: "POST", body: JSON.stringify(payload) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (!j.ok) throw new Error(j.error || "The sheet rejected the request."); return j; });
+  }
+
+  function applyFixes() {
+    var by = $("fixBy").value.trim(), pass = $("fixPass").value;
+    if (!pass) { fixState.error = "Enter the passcode set in the Apps Script."; renderFix(); return; }
+    store("okb-by", by || null);
+    store("okb-pass", $("fixRemember").checked ? pass : null);
+    var chosen = selectedFixes();
+    fixState.busy = true;
+    fixState.error = "";
+    renderFix();
+    post({
+      action: "apply", passcode: pass, by: by || "Website",
+      changes: chosen.map(function (f) {
+        return { id: f.id, issue: f.issue, label: f.desc, row: f.row, col: f.col, before: f.before, preview: f.preview, kind: f.kind, value: f.value, range: f.range };
+      })
+    }).then(function (res) {
+      fixState.busy = false;
+      fixState.result = res;
+      renderFix();
+      fixState.history = null;
+      loadHistory();
+      setTimeout(load, 1500);
+    }).catch(function (err) {
+      fixState.busy = false;
+      fixState.error = "Could not apply fixes: " + err.message;
+      renderFix();
+    });
+  }
+
+  // ----- History -----
+  function loadHistory() {
+    var url = endpoint();
+    if (!url) return renderHistory();
+    fixState.loadingHistory = true;
+    renderHistory();
+    fetch(url + (url.indexOf("?") < 0 ? "?" : "&") + "action=history&limit=400")
+      .then(function (r) { return r.json(); })
+      .then(function (j) { fixState.history = j.history || []; fixState.historyError = ""; })
+      .catch(function (e) { fixState.historyError = "Could not load history (" + e.message + ")."; })
+      .then(function () { fixState.loadingHistory = false; renderHistory(); });
+  }
+
+  function renderHistory() {
+    var el = $("history");
+    if (!endpoint()) {
+      el.innerHTML = '<p class="muted small">Every fix applied from this page is listed here, with who made it, what changed and an Undo button. Connect the sheet to start.</p><button type="button" class="btn" data-open-fix>Connect Google Sheets</button>';
+      return;
+    }
+    if (fixState.loadingHistory && !fixState.history) { el.innerHTML = '<p class="muted small">Loading history…</p>'; return; }
+    if (fixState.historyError) { el.innerHTML = '<p class="fix-error">' + esc(fixState.historyError) + "</p>"; return; }
+    var h = fixState.history || [];
+    if (!h.length) { el.innerHTML = '<p class="muted small">No fixes have been applied yet.</p>'; return; }
+    var batches = [], idx = {};
+    h.forEach(function (e) {
+      if (!idx[e.batch]) { idx[e.batch] = { id: e.batch, time: e.time, by: e.by, action: e.action, items: [] }; batches.push(idx[e.batch]); }
+      idx[e.batch].items.push(e);
+    });
+    el.innerHTML = batches.slice(0, 30).map(function (b) {
+      var applied = b.items.filter(function (e) { return e.status === "applied"; }).length;
+      var undone = b.items.filter(function (e) { return e.status === "undone"; }).length;
+      var other = b.items.length - applied - undone;
+      var issues = {};
+      b.items.forEach(function (e) { issues[e.issue || "Other"] = (issues[e.issue || "Other"] || 0) + 1; });
+      var when = new Date(b.time);
+      var canUndo = b.action === "fix" && applied > 0;
+      return '<details class="batch' + (b.action === "undo" ? " is-undo" : "") + (undone && !applied ? " is-undone" : "") + '"><summary>' +
+        '<span class="b-icon">' + (b.action === "undo" ? "↶" : "✓") + "</span>" +
+        '<span class="b-main"><b>' + (b.action === "undo" ? "Undo" : "Fixed " + b.items.length + " cell" + (b.items.length === 1 ? "" : "s")) + "</b>" +
+        '<span class="muted small">' + esc(isNaN(when) ? b.time : when.toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })) + " · " + esc(b.by || "Website") + "</span>" +
+        '<span class="b-tags">' + Object.keys(issues).map(function (k) { return '<span class="tag">' + esc(k) + " · " + issues[k] + "</span>"; }).join("") +
+        (undone ? '<span class="tag t-undone">' + undone + " undone</span>" : "") + (other ? '<span class="tag t-skip">' + other + " skipped</span>" : "") + "</span></span>" +
+        (canUndo ? '<button type="button" class="btn small-btn" data-undo="' + esc(b.id) + '">Undo</button>' : "") +
+        "</summary><ul>" + b.items.map(function (e) {
+          return '<li><span class="fi-cell">' + esc(e.cell) + '</span><span class="fi-main"><span class="fi-diff"><s>' + esc(e.before === "" ? "(empty)" : e.before) + "</s> → <b>" + esc(e.after === "" ? "(empty)" : e.after) + '</b></span><span class="muted small">' + esc(e.issue) + " · " + esc(e.status) + "</span></span></li>";
+        }).join("") + "</ul></details>";
+    }).join("");
+  }
+
+  function undoBatch(id) {
+    var pass = store("okb-pass") || window.prompt("Passcode to undo this batch:");
+    if (!pass) return;
+    if (!window.confirm("Undo every change in this batch? Cells edited since then are left as they are.")) return;
+    post({ action: "undo", passcode: pass, by: store("okb-by") || "Website", batch: id })
+      .then(function (r) {
+        fixState.history = null;
+        loadHistory();
+        setTimeout(load, 1500);
+        window.alert(r.restored + " cell(s) restored.");
+      })
+      .catch(function (e) { window.alert("Undo failed: " + e.message); });
+  }
+
+  function bindFix() {
+    document.addEventListener("click", function (e) {
+      if (e.target.closest("[data-open-fix]") || e.target.closest("#resolveBtn")) { openFix(); return; }
+      var u = e.target.closest("[data-undo]");
+      if (u) { e.preventDefault(); e.stopPropagation(); undoBatch(u.getAttribute("data-undo")); return; }
+      if (e.target.closest("[data-edit-url]")) { fixState.editUrl = true; renderFix(); return; }
+      if (e.target.closest("[data-back-fix]")) { fixState.editUrl = false; renderFix(); return; }
+      if (e.target.closest("#saveUrl")) {
+        var v = $("fixUrl").value.trim();
+        if (!/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(v)) { fixState.error = "That doesn't look like an Apps Script web app URL (https://script.google.com/macros/s/…/exec)."; renderFix(); return; }
+        store("okb-endpoint", v);
+        fixState.editUrl = false;
+        fixState.error = "";
+        fixState.history = null;
+        renderFix();
+        renderFixCta();
+        return;
+      }
+      if (e.target.closest("#applyFix")) { applyFixes(); return; }
+      if (e.target.closest("[data-close-fix]")) { $("fixDialog").close(); return; }
+    });
+    $("fixBody").addEventListener("change", function (e) {
+      var t = e.target;
+      if (t.hasAttribute("data-fix")) fixState.sel[t.getAttribute("data-fix")] = t.checked;
+      else if (t.hasAttribute("data-fix-all")) {
+        fixState.list.forEach(function (f) { if (f.group === t.getAttribute("data-fix-all")) fixState.sel[f.id] = t.checked; });
+      } else if (t.hasAttribute("data-fix-cat")) {
+        var k = t.getAttribute("data-fix-cat").split("|");
+        fixState.list.forEach(function (f) { if (f.group === k[0] && f.issue === k[1]) fixState.sel[f.id] = t.checked; });
+      } else return;
+      var open = [].map.call($("fixBody").querySelectorAll("details"), function (d) { return d.open; });
+      var top = $("fixBody").scrollTop;
+      renderFix();
+      [].forEach.call($("fixBody").querySelectorAll("details"), function (d, i) { if (open[i] != null) d.open = open[i]; });
+      $("fixBody").scrollTop = top;
+    });
+    $("fixForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      if (document.activeElement && document.activeElement.id === "fixPass" && !$("applyFix").disabled) applyFixes();
+    });
+    $("fixDialog").addEventListener("close", function () { fixState.error = ""; fixState.editUrl = false; });
+    $("historyRefresh").addEventListener("click", function () { fixState.history = null; loadHistory(); });
   }
 
   // ---------- URL state ----------
@@ -1229,6 +1593,7 @@
 
   initTheme();
   bind();
+  bindFix();
   readUrl();
   load();
 
