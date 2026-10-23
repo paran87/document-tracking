@@ -27,6 +27,10 @@ Filters are kept in the URL, so a filtered view can be shared as a link.
 
 Writes require the passcode; the history list is readable without it.
 
+Cell links (the Drive links on the region totals) are kept when a cell is rewritten. When an extra region total is emptied, its link moves to the region's total, or to the office name on that row if the total already has a link. The *Note* column in Fix History records where each link went.
+
+**Updating the script:** paste the new `Code.gs`, then **Deploy → Manage deployments → Edit → Version: New version → Deploy**, and allow the new permission (the script reads cell links through the Sheets API).
+
 ## Data
 
 The page loads the sheet live (CSV export) every time it opens or when **Refresh** is pressed.

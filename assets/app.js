@@ -1165,7 +1165,7 @@
         desc: name + " total becomes =SUM(F" + first + ":F" + last + ") on the region's first row" });
       (d.declaredCells[name] || []).forEach(function (c) {
         if (c.row === first) return;
-        add({ group: "safe", issue: "Region total", row: c.row, col: 7, before: rawCell(c.row, 7), preview: "", kind: "clear", value: "",
+        add({ group: "safe", issue: "Region total", row: c.row, col: 7, before: rawCell(c.row, 7), preview: "", kind: "clear", value: "", linkTo: { row: first, col: 7 },
           desc: "Remove the extra " + name + " total (now combined on row " + first + ")" });
       });
     });
@@ -1354,7 +1354,7 @@
     post({
       action: "apply", passcode: pass, by: by || "Website",
       changes: chosen.map(function (f) {
-        return { id: f.id, issue: f.issue, label: f.desc, row: f.row, col: f.col, before: f.before, preview: f.preview, kind: f.kind, value: f.value, range: f.range };
+        return { id: f.id, issue: f.issue, label: f.desc, row: f.row, col: f.col, before: f.before, preview: f.preview, kind: f.kind, value: f.value, range: f.range, linkTo: f.linkTo };
       })
     }).then(function (res) {
       fixState.busy = false;
