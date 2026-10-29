@@ -1055,7 +1055,9 @@
     var iss = state.audit.issues;
     var crit = iss.filter(function (i) { return i.severity === "critical"; }).length;
     var g = iss.filter(function (i) { return i.type === "grand-total"; })[0];
-    $("alert").hidden = !iss.length;
+    // Banner hidden for presentations; remove the next two lines to show it again.
+    $("alert").hidden = true;
+    return;
     $("alert").innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2zM12 10v5M12 18v.5"/></svg><span><b>' + iss.length + " issues found in the source sheet</b> — " + crit + " critical" +
       (g ? ", including a TOTAL row that is off by " + compact(Math.abs(g.impact)) : "") +
       (function () { var n = iss.filter(function (i) { return REALITY_TYPES.indexOf(i.type) >= 0; }).length; return n ? ", and " + n + " equipment entries that can't exist as written" : ""; })() + '.</span><span class="alert-cta">Review &amp; fix →</span>';
