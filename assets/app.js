@@ -819,7 +819,7 @@
       ["main", "Total Amount", money(total), isFiltered ? pct(total, allTotal) + " of " + compact(allTotal) + " overall" : (state.declaredGrand && Math.abs(state.declaredGrand - total) > 1 ? "" : "across all regions")],
       ["", "Equipment units", int.format(sum(rows, "qty")), "pieces requested"],
       ["", "Line items", int.format(rows.length), "distinct requests"],
-      ["", "Implementing offices", int.format(Object.keys(offices).length), "DEOs & regional offices"],
+      ["", "Implementing offices", int.format(Object.keys(offices).length), "out of 190 DEOs & ROs"],
       ["", "Regions", int.format(Object.keys(regions).length), "of " + state.regions.length + " in the sheet"]
     ];
     $("kpis").innerHTML = k.map(function (x) {
