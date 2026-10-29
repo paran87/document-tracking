@@ -816,7 +816,7 @@
     rows.forEach(function (r) { offices[r.region + "|" + r.office] = 1; regions[r.region] = 1; });
     var isFiltered = rows.length !== state.all.length;
     var k = [
-      ["main", "Total amount requested", money(total), isFiltered ? pct(total, allTotal) + " of " + compact(allTotal) + " overall" : (state.declaredGrand && Math.abs(state.declaredGrand - total) > 1 ? "sum of all rows · sheet's TOTAL row says " + compact(state.declaredGrand) + " ⚠" : "across all regions")],
+      ["main", "Total Amount", money(total), isFiltered ? pct(total, allTotal) + " of " + compact(allTotal) + " overall" : (state.declaredGrand && Math.abs(state.declaredGrand - total) > 1 ? "" : "across all regions")],
       ["", "Equipment units", int.format(sum(rows, "qty")), "pieces requested"],
       ["", "Line items", int.format(rows.length), "distinct requests"],
       ["", "Implementing offices", int.format(Object.keys(offices).length), "DEOs & regional offices"],
